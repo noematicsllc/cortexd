@@ -45,6 +45,8 @@ defmodule Cortex.Store do
     case :mnesia.create_table(name, opts) do
       {:atomic, :ok} -> :ok
       {:aborted, {:already_exists, ^name}} -> :ok
+      # Table exists with different storage type - that's fine, use it as-is
+      {:aborted, {:bad_type, ^name, _type, _node}} -> :ok
       {:aborted, reason} -> Logger.error("Failed to create #{name}: #{inspect(reason)}")
     end
   end
