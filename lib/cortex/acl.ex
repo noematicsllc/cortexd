@@ -43,12 +43,14 @@ defmodule Cortex.ACL do
 
         case Store.acl_check(identity, table_name, permission) do
           {:ok, true} -> :ok
-          {:ok, false} -> {:error, :unauthorized}
+          # Uniform error prevents table existence probing
+          {:ok, false} -> {:error, :access_denied}
           error -> error
         end
 
       {:error, :not_found} ->
-        {:error, :table_not_found}
+        # Same error as unauthorized - prevents probing for table existence
+        {:error, :access_denied}
 
       error ->
         error
