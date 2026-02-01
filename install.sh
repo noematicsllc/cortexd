@@ -26,6 +26,14 @@ if ! getent passwd cortex > /dev/null; then
     echo "Created user: cortex"
 fi
 
+# Add the installing user to the cortex group
+if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+    if ! groups "$SUDO_USER" | grep -q '\bcortex\b'; then
+        usermod -a -G cortex "$SUDO_USER"
+        echo "Added $SUDO_USER to cortex group (log out and back in to take effect)"
+    fi
+fi
+
 # Create directories
 mkdir -p "$INSTALL_DIR/bin"
 mkdir -p "$INSTALL_DIR/mnesia"

@@ -69,14 +69,16 @@ Tables are namespaced by creator UID (`1000:users`). Users access their own tabl
 
 ## Agent Deployment
 
-Each AI agent can run as a dedicated system user:
+Each AI agent runs as a dedicated system user in the `cortex` group:
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin agent-coder
+sudo useradd -r -s /usr/sbin/nologin -G cortex agent-coder
 sudo -u agent-coder claude -p "do agent stuff"
 ```
 
 The agent's UID becomes its Cortex identity automatically. No tokens or API keys needed.
+
+**Note:** Users must be in the `cortex` group to access the daemon. The install script adds the installing user automatically. For additional users: `sudo usermod -a -G cortex USERNAME` (log out/in to take effect).
 
 ## Usage Patterns
 
