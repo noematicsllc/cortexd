@@ -15,6 +15,12 @@ RUN_DIR="/run/cortex"
 
 echo "Installing Cortex..."
 
+# Stop daemon if running (so we can overwrite files)
+if systemctl is-active --quiet cortexd 2>/dev/null; then
+    echo "Stopping existing cortexd service..."
+    systemctl stop cortexd
+fi
+
 # Create cortex group and user
 if ! getent group cortex > /dev/null; then
     groupadd -r cortex
@@ -68,8 +74,6 @@ User=cortex
 Group=cortex
 WorkingDirectory=/var/lib/cortex
 Environment=HOME=/var/lib/cortex
-Environment=CORTEX_SOCKET=/run/cortex/cortex.sock
-Environment=CORTEX_DATA_DIR=/var/lib/cortex/mnesia
 ExecStart=/var/lib/cortex/bin/bin/cortex start
 ExecStop=/var/lib/cortex/bin/bin/cortex stop
 Restart=on-failure
@@ -100,4 +104,7 @@ echo ""
 echo "To use the CLI:"
 echo "  cortex ping"
 echo "  cortex status"
+echo ""
+echo "To uninstall:"
+echo "  sudo ./uninstall.sh"
 echo ""
