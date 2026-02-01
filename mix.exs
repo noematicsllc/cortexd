@@ -4,7 +4,7 @@ defmodule Cortex.MixProject do
   def project do
     [
       app: :cortex,
-      version: "0.1.0",
+      version: "0.1.0-alpha",
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       compilers: [:elixir_make] ++ Mix.compilers(),
@@ -38,6 +38,7 @@ defmodule Cortex.MixProject do
   defp releases do
     [
       cortex: [
+        include_erts: true,   # Bundle Erlang runtime for standalone distribution
         applications: [
           mnesia: :load,      # Include but don't start - we start it manually
           cortex: :permanent

@@ -17,6 +17,15 @@ defmodule Cortex.ACL do
   - :admin - acl_grant, acl_revoke, drop_table
   """
   def authorize(uid, table_name, operation) do
+    # Root bypasses all ACL checks
+    if uid == 0 do
+      :ok
+    else
+      authorize_non_root(uid, table_name, operation)
+    end
+  end
+
+  defp authorize_non_root(uid, table_name, operation) do
     identity = Identity.uid_to_identity(uid)
 
     # Check ownership first

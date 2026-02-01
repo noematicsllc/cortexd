@@ -48,15 +48,18 @@ echo -n "Installing release... "
 cp -r _build/prod/rel/cortex/* "$INSTALL_DIR/bin/"
 echo "done"
 
-# Build escript CLI (must use prod to get correct socket path)
+# Build Rust CLI
 echo -n "Building CLI... "
-MIX_ENV=prod mix escript.build > /dev/null 2>&1
-echo "done"
-
-# Install CLI
-cp cortex "$BIN_DIR/cortex"
-chmod 755 "$BIN_DIR/cortex"
-echo "Installed CLI to $BIN_DIR/cortex"
+if command -v cargo > /dev/null 2>&1; then
+    (cd cli && cargo build --release > /dev/null 2>&1)
+    cp cli/target/release/cortex-cli "$BIN_DIR/cortex"
+    chmod 755 "$BIN_DIR/cortex"
+    echo "done"
+    echo "Installed CLI to $BIN_DIR/cortex"
+else
+    echo "skipped (cargo not found)"
+    echo "  Install Rust to build CLI, or download pre-built binary from GitHub releases"
+fi
 
 # Set ownership
 chown -R cortex:cortex "$INSTALL_DIR"

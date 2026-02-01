@@ -2,30 +2,52 @@
 
 A local storage daemon providing an embedded Mnesia database accessible via Unix socket. UID-based authentication with per-table access control.
 
+**Current version: 0.1.0-alpha**
+
 ## Features
 
-- **Zero dependencies** - No Docker, no Postgres, no Redis. Just the binary.
+- **Zero dependencies** - Pre-built binaries, no runtime requirements
 - **Embedded storage** - Mnesia database with transactions and pattern matching
 - **UID-based auth** - Kernel-enforced identity via SO_PEERCRED (no tokens to steal)
 - **Per-table ACLs** - Read, write, admin permissions with world-readable option
-- **Cross-platform** - Linux and macOS support
-
-## Requirements
-
-- **Elixir 1.17+** and **Erlang/OTP 26+** (for building)
-- **Linux** or **macOS** (for running)
-- **systemd** (optional, for running as a service on Linux)
+- **Cross-platform** - Linux (x86_64, ARM64) and macOS (Intel, Apple Silicon)
 
 ## Installation
 
+### Option 1: Pre-built Binaries (Recommended)
+
+Download from [GitHub Releases](https://github.com/rynmrtn/cortexd/releases):
+
 ```bash
-git clone https://github.com/yourusername/cortexd.git
+# Download daemon (includes bundled Erlang runtime)
+curl -LO https://github.com/rynmrtn/cortexd/releases/latest/download/cortexd-0.1.0-alpha-linux-x86_64.tar.gz
+tar -xzf cortexd-*.tar.gz
+
+# Download CLI (standalone, no dependencies)
+sudo curl -L -o /usr/local/bin/cortex \
+  https://github.com/rynmrtn/cortexd/releases/latest/download/cortex-linux-x86_64
+sudo chmod +x /usr/local/bin/cortex
+
+# Install daemon
+sudo mkdir -p /var/lib/cortex
+sudo mv cortex /var/lib/cortex/bin
+sudo useradd -r -g nogroup -d /var/lib/cortex -s /usr/sbin/nologin cortex 2>/dev/null || true
+sudo chown -R cortex:nogroup /var/lib/cortex
+
+# Test
+cortex --version
+```
+
+### Option 2: Build from Source
+
+Requires Elixir 1.17+ and Rust (for CLI):
+
+```bash
+git clone https://github.com/rynmrtn/cortexd.git
 cd cortexd
 sudo ./install.sh
 sudo systemctl enable --now cortexd
 ```
-
-The install script builds the project and installs everything. You need Elixir installed to build.
 
 ## Uninstall
 
@@ -38,6 +60,11 @@ You'll be prompted whether to keep or delete your data.
 ## Usage
 
 ```bash
+# Version and help
+cortex --version
+cortex --help
+cortex help memories    # Usage patterns documentation
+
 # Health check
 cortex ping
 cortex status
@@ -204,26 +231,24 @@ mix test
 
 ## What Gets Installed
 
-The install script creates the following:
-
 | Path | What it is |
 |------|------------|
-| `/usr/local/bin/cortex` | CLI tool - the command you run to interact with Cortex |
-| `/var/lib/cortex/bin/` | The daemon itself (an Elixir release - self-contained runtime + app) |
-| `/var/lib/cortex/mnesia/` | Database storage - all your tables and data live here |
+| `/usr/local/bin/cortex` | CLI tool (standalone Rust binary, ~800KB, no dependencies) |
+| `/var/lib/cortex/bin/` | The daemon (Elixir release with bundled Erlang runtime) |
+| `/var/lib/cortex/mnesia/` | Database storage - all your tables and data |
 | `/run/cortex/cortex.sock` | Unix socket - how the CLI talks to the daemon |
-| `/etc/systemd/system/cortexd.service` | systemd service file - lets you `systemctl start/stop cortexd` |
+| `/etc/systemd/system/cortexd.service` | systemd service file |
 
 **Users/Groups created:**
 - `cortex` system user and group - the daemon runs as this user for security isolation
 
 **What is Mnesia?**
 
-Mnesia is Erlang's built-in database. It's embedded (no separate server), supports transactions, and can persist to disk. Your data is stored as binary files in `/var/lib/cortex/mnesia/`. When you uninstall, you can choose to keep this directory to preserve your data.
+Mnesia is Erlang's built-in database. It's embedded (no separate server), supports transactions, and can persist to disk. Your data is stored in `/var/lib/cortex/mnesia/`.
 
 **What is an Elixir release?**
 
-A release bundles the Elixir/Erlang runtime with the application into a self-contained directory. This means the daemon runs without needing Elixir installed on the system - everything it needs is in `/var/lib/cortex/bin/`.
+A release bundles the Erlang runtime with the application. The daemon runs without needing Elixir installed - everything is in `/var/lib/cortex/bin/`.
 
 ## Claude Code Integration
 

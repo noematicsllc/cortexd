@@ -100,6 +100,7 @@ defmodule Cortex.Handler do
 
   defp dispatch("status", _params, _uid) do
     {:ok, %{
+      version: Cortex.Version.version(),
       status: "running",
       node: node(),
       tables: :mnesia.system_info(:tables) |> length()

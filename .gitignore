@@ -26,6 +26,9 @@ cortex-*.tar
 /priv/*.so
 /priv/*.dylib
 
-# Built escript
+# Built escript (legacy)
 /cortex
+
+# Rust CLI build artifacts
+/cli/target/
 
