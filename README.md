@@ -10,18 +10,30 @@ A local storage daemon providing an embedded Mnesia database accessible via Unix
 - **Per-table ACLs** - Read, write, admin permissions with world-readable option
 - **Cross-platform** - Linux and macOS support
 
+## Requirements
+
+- **Elixir 1.17+** and **Erlang/OTP 26+** (for building)
+- **Linux** or **macOS** (for running)
+- **systemd** (optional, for running as a service on Linux)
+
 ## Installation
 
 ```bash
-# Build
-mix deps.get
-mix compile
-MIX_ENV=prod mix release
-
-# Install (Linux)
+git clone https://github.com/yourusername/cortexd.git
+cd cortexd
 sudo ./install.sh
 sudo systemctl enable --now cortexd
 ```
+
+The install script builds the project and installs everything. You need Elixir installed to build.
+
+## Uninstall
+
+```bash
+sudo ./uninstall.sh
+```
+
+You'll be prompted whether to keep or delete your data.
 
 ## Usage
 
@@ -190,14 +202,28 @@ mix compile
 mix test
 ```
 
-## File Locations
+## What Gets Installed
 
-| Path | Purpose |
-|------|---------|
-| `/usr/local/bin/cortex` | CLI binary (setgid cortex) |
-| `/var/lib/cortex/bin/` | Daemon release |
-| `/var/lib/cortex/mnesia/` | Data directory |
-| `/run/cortex/cortex.sock` | Unix socket |
+The install script creates the following:
+
+| Path | What it is |
+|------|------------|
+| `/usr/local/bin/cortex` | CLI tool - the command you run to interact with Cortex |
+| `/var/lib/cortex/bin/` | The daemon itself (an Elixir release - self-contained runtime + app) |
+| `/var/lib/cortex/mnesia/` | Database storage - all your tables and data live here |
+| `/run/cortex/cortex.sock` | Unix socket - how the CLI talks to the daemon |
+| `/etc/systemd/system/cortexd.service` | systemd service file - lets you `systemctl start/stop cortexd` |
+
+**Users/Groups created:**
+- `cortex` system user and group - the daemon runs as this user for security isolation
+
+**What is Mnesia?**
+
+Mnesia is Erlang's built-in database. It's embedded (no separate server), supports transactions, and can persist to disk. Your data is stored as binary files in `/var/lib/cortex/mnesia/`. When you uninstall, you can choose to keep this directory to preserve your data.
+
+**What is an Elixir release?**
+
+A release bundles the Elixir/Erlang runtime with the application into a self-contained directory. This means the daemon runs without needing Elixir installed on the system - everything it needs is in `/var/lib/cortex/bin/`.
 
 ## Claude Code Integration
 

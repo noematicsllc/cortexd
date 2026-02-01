@@ -94,10 +94,11 @@ See README.md for full examples.
 
 ## File Locations
 
-- **CLI:** `/usr/local/bin/cortex` (setgid cortex)
+- **CLI:** `/usr/local/bin/cortex`
 - **Daemon:** `/var/lib/cortex/bin/`
-- **Socket:** `/run/cortex/cortex.sock` (mode 0660)
+- **Socket:** `/run/cortex/cortex.sock` (mode 0666)
 - **Data:** `/var/lib/cortex/mnesia/`
+- **Service:** `/etc/systemd/system/cortexd.service`
 
 ## Future Work (v2+)
 
