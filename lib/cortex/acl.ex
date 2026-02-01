@@ -44,13 +44,20 @@ defmodule Cortex.ACL do
 
       {:ok, _meta} ->
         # Not owner, check ACLs
-        permission = operation_to_permission(operation)
+        case operation_to_permission(operation) do
+          {:error, :unknown_operation} ->
+            # Log and deny - don't crash the handler
+            require Logger
+            Logger.error("Unknown operation in ACL check: #{inspect(operation)}")
+            {:error, :access_denied}
 
-        case Store.acl_check(identity, table_name, permission) do
-          {:ok, true} -> :ok
-          # Uniform error prevents table existence probing
-          {:ok, false} -> {:error, :access_denied}
-          error -> error
+          permission ->
+            case Store.acl_check(identity, table_name, permission) do
+              {:ok, true} -> :ok
+              # Uniform error prevents table existence probing
+              {:ok, false} -> {:error, :access_denied}
+              error -> error
+            end
         end
 
       {:error, :not_found} ->
@@ -112,6 +119,6 @@ defmodule Cortex.ACL do
   defp operation_to_permission(op) when op in [:get, :match, :all], do: :read
   defp operation_to_permission(op) when op in [:put, :delete], do: :write
   defp operation_to_permission(op) when op in [:acl_grant, :acl_revoke, :drop_table], do: :admin
-  # Fail explicitly on unknown operations rather than defaulting to :read
-  defp operation_to_permission(op), do: raise("Unknown operation: #{inspect(op)}")
+  # Return error for unknown operations rather than crashing the handler
+  defp operation_to_permission(_op), do: {:error, :unknown_operation}
 end
