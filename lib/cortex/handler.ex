@@ -81,6 +81,7 @@ defmodule Cortex.Handler do
 
   defp handle_message([0, msgid, method, params], uid) do
     result = dispatch(method, params, uid)
+
     case result do
       {:ok, value} -> Protocol.encode_response(msgid, value)
       {:error, reason} -> Protocol.encode_error(msgid, reason)
@@ -99,12 +100,13 @@ defmodule Cortex.Handler do
   end
 
   defp dispatch("status", _params, _uid) do
-    {:ok, %{
-      version: Cortex.Version.version(),
-      status: "running",
-      node: node(),
-      tables: :mnesia.system_info(:tables) |> length()
-    }}
+    {:ok,
+     %{
+       version: Cortex.Version.version(),
+       status: "running",
+       node: node(),
+       tables: :mnesia.system_info(:tables) |> length()
+     }}
   end
 
   defp dispatch("tables", _params, uid) do
@@ -112,11 +114,13 @@ defmodule Cortex.Handler do
     {:ok, tables}
   end
 
-  defp dispatch("create_table", [name, attributes], uid) when is_binary(name) and is_list(attributes) do
-    attrs = Enum.map(attributes, fn
-      a when is_binary(a) -> String.to_atom(a)
-      a when is_atom(a) -> a
-    end)
+  defp dispatch("create_table", [name, attributes], uid)
+       when is_binary(name) and is_list(attributes) do
+    attrs =
+      Enum.map(attributes, fn
+        a when is_binary(a) -> String.to_atom(a)
+        a when is_atom(a) -> a
+      end)
 
     case Store.create_table(uid, name, attrs) do
       {:ok, _table_name} -> {:ok, "created"}
@@ -167,7 +171,8 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("match", [table_name, pattern], uid) when is_binary(table_name) and is_map(pattern) do
+  defp dispatch("match", [table_name, pattern], uid)
+       when is_binary(table_name) and is_map(pattern) do
     table = Store.resolve_table(uid, table_name)
 
     with :ok <- ACL.authorize(uid, table, :match) do
@@ -206,9 +211,11 @@ defmodule Cortex.Handler do
   defp dispatch("acl_list", _params, uid) do
     case Store.acl_list(uid) do
       {:ok, acls} ->
-        formatted = Enum.map(acls, fn {identity, table, perms} ->
-          %{identity: identity, table: table, permissions: perms}
-        end)
+        formatted =
+          Enum.map(acls, fn {identity, table, perms} ->
+            %{identity: identity, table: table, permissions: perms}
+          end)
+
         {:ok, formatted}
 
       error ->

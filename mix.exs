@@ -38,9 +38,11 @@ defmodule Cortex.MixProject do
   defp releases do
     [
       cortex: [
-        include_erts: true,   # Bundle Erlang runtime for standalone distribution
+        # Bundle Erlang runtime for standalone distribution
+        include_erts: true,
         applications: [
-          mnesia: :load,      # Include but don't start - we start it manually
+          # Include but don't start - we start it manually
+          mnesia: :load,
           cortex: :permanent
         ]
       ]

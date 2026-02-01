@@ -37,6 +37,7 @@ defmodule Cortex.ACL do
       {:ok, _meta} ->
         # Not owner, check ACLs
         permission = operation_to_permission(operation)
+
         case Store.acl_check(identity, table_name, permission) do
           {:ok, true} -> :ok
           {:ok, false} -> {:error, :unauthorized}
@@ -79,6 +80,7 @@ defmodule Cortex.ACL do
 
   defp validate_permissions(perms) do
     valid = [:read, :write, :admin]
+
     if Enum.all?(perms, &(&1 in valid)) do
       {:ok, perms}
     else

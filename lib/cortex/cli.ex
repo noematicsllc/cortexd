@@ -6,7 +6,8 @@ defmodule Cortex.CLI do
   alias Cortex.Client
 
   def main(args) do
-    {opts, args, _} = OptionParser.parse(args, switches: [pretty: :boolean, help: :boolean, version: :boolean])
+    {opts, args, _} =
+      OptionParser.parse(args, switches: [pretty: :boolean, help: :boolean, version: :boolean])
 
     cond do
       # Version flag
@@ -752,6 +753,7 @@ defmodule Cortex.CLI do
 
   defp print_command_help(unknown) do
     cmd = Enum.join(unknown, " ")
+
     IO.puts("""
     Unknown help topic: #{cmd}
 

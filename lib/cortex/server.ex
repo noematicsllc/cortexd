@@ -53,10 +53,12 @@ defmodule Cortex.Server do
   def handle_info(:accept, state) do
     case :gen_tcp.accept(state.socket, 100) do
       {:ok, client_socket} ->
-        {:ok, pid} = DynamicSupervisor.start_child(
-          Cortex.HandlerSupervisor,
-          {Cortex.Handler, client_socket}
-        )
+        {:ok, pid} =
+          DynamicSupervisor.start_child(
+            Cortex.HandlerSupervisor,
+            {Cortex.Handler, client_socket}
+          )
+
         :gen_tcp.controlling_process(client_socket, pid)
         send(pid, :start)
         send(self(), :accept)

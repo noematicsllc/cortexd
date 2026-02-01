@@ -49,6 +49,7 @@ defmodule Cortex.Store do
 
   defp create_system_table(name, attributes) do
     opts = [{:attributes, attributes}, {storage_type(), [node()]}]
+
     case :mnesia.create_table(name, opts) do
       {:atomic, :ok} -> :ok
       {:aborted, {:already_exists, ^name}} -> :ok
@@ -69,19 +70,24 @@ defmodule Cortex.Store do
 
   # Public API
 
-  def create_table(owner_uid, name, attributes) when is_list(attributes) and length(attributes) > 0 do
+  def create_table(owner_uid, name, attributes)
+      when is_list(attributes) and length(attributes) > 0 do
     table_name = namespaced_table(owner_uid, name)
     key_field = hd(attributes)
 
     opts = [{:attributes, [:key, :data]}, {storage_type(), [node()]}]
+
     case :mnesia.create_table(table_name, opts) do
       {:atomic, :ok} ->
         # Store metadata
         :mnesia.transaction(fn ->
           :mnesia.write({@meta_table, table_name, owner_uid, key_field, attributes})
           # Owner gets full access
-          :mnesia.write({@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]})
+          :mnesia.write(
+            {@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]}
+          )
         end)
+
         {:ok, table_name}
 
       {:aborted, {:already_exists, ^table_name}} ->
@@ -104,6 +110,7 @@ defmodule Cortex.Store do
           :mnesia.match_object({@acl_table, {:_, table_name}, :_})
           |> Enum.each(fn {_, key, _} -> :mnesia.delete({@acl_table, key}) end)
         end)
+
         :ok
 
       {:aborted, {:no_exists, ^table_name}} ->
@@ -118,12 +125,14 @@ defmodule Cortex.Store do
     case get_table_meta(table_name) do
       {:ok, meta} ->
         key_field = Atom.to_string(meta.key_field)
+
         case Map.get(record, key_field) || Map.get(record, String.to_atom(key_field)) do
           nil ->
             {:error, :missing_key}
 
           key ->
             key_str = stringify(key)
+
             :mnesia.transaction(fn ->
               :mnesia.write({table_name, key_str, record})
             end)
@@ -137,6 +146,7 @@ defmodule Cortex.Store do
 
   def get(table_name, key) do
     key_str = stringify(key)
+
     case :mnesia.transaction(fn -> :mnesia.read({table_name, key_str}) end) do
       {:atomic, [{^table_name, ^key_str, data}]} -> {:ok, data}
       {:atomic, []} -> {:error, :not_found}
@@ -146,6 +156,7 @@ defmodule Cortex.Store do
 
   def delete(table_name, key) do
     key_str = stringify(key)
+
     :mnesia.transaction(fn ->
       :mnesia.delete({table_name, key_str})
     end)
@@ -171,6 +182,7 @@ defmodule Cortex.Store do
 
   def tables(owner_uid) do
     prefix = "#{owner_uid}:"
+
     :mnesia.system_info(:tables)
     |> Enum.filter(fn table ->
       name = Atom.to_string(table)
@@ -197,7 +209,9 @@ defmodule Cortex.Store do
             {:ok, meta} ->
               short_name = table_name |> Atom.to_string() |> String.replace(~r/^\d+:/, "")
               {short_name, meta.owner}
-            _ -> nil
+
+            _ ->
+              nil
           end
         end)
         |> Enum.reject(&is_nil/1)
@@ -217,7 +231,9 @@ defmodule Cortex.Store do
             {:ok, meta} ->
               short_name = table_name |> Atom.to_string() |> String.replace(~r/^\d+:/, "")
               {short_name, meta.owner}
-            _ -> nil
+
+            _ ->
+              nil
           end
         end)
         |> Enum.reject(&is_nil/1)
@@ -236,10 +252,13 @@ defmodule Cortex.Store do
   def acl_grant(identity, table_name, permissions) when is_list(permissions) do
     :mnesia.transaction(fn ->
       key = {identity, table_name}
-      existing = case :mnesia.read({@acl_table, key}) do
-        [{@acl_table, ^key, perms}] -> perms
-        [] -> []
-      end
+
+      existing =
+        case :mnesia.read({@acl_table, key}) do
+          [{@acl_table, ^key, perms}] -> perms
+          [] -> []
+        end
+
       merged = Enum.uniq(existing ++ permissions)
       :mnesia.write({@acl_table, key, merged})
     end)
@@ -249,14 +268,17 @@ defmodule Cortex.Store do
   def acl_revoke(identity, table_name, permissions) when is_list(permissions) do
     :mnesia.transaction(fn ->
       key = {identity, table_name}
+
       case :mnesia.read({@acl_table, key}) do
         [{@acl_table, ^key, existing}] ->
           remaining = existing -- permissions
+
           if remaining == [] do
             :mnesia.delete({@acl_table, key})
           else
             :mnesia.write({@acl_table, key, remaining})
           end
+
         [] ->
           :ok
       end
@@ -276,6 +298,7 @@ defmodule Cortex.Store do
           case :mnesia.read({@acl_table, {"*", table_name}}) do
             [{@acl_table, _, perms}] when is_list(perms) ->
               permission in perms
+
             [] ->
               false
           end
@@ -287,14 +310,19 @@ defmodule Cortex.Store do
   def acl_list(owner_uid) do
     :mnesia.transaction(fn ->
       # Get ACLs for tables owned by this user
-      :mnesia.foldl(fn {_, {id, table}, perms}, acc ->
-        case get_table_meta(table) do
-          {:ok, %{owner: ^owner_uid}} ->
-            [{id, Atom.to_string(table), perms} | acc]
-          _ ->
-            acc
-        end
-      end, [], @acl_table)
+      :mnesia.foldl(
+        fn {_, {id, table}, perms}, acc ->
+          case get_table_meta(table) do
+            {:ok, %{owner: ^owner_uid}} ->
+              [{id, Atom.to_string(table), perms} | acc]
+
+            _ ->
+              acc
+          end
+        end,
+        [],
+        @acl_table
+      )
     end)
     |> transaction_result()
   end
@@ -317,8 +345,10 @@ defmodule Cortex.Store do
     case :mnesia.transaction(fn -> :mnesia.read({@meta_table, table_name}) end) do
       {:atomic, [{@meta_table, ^table_name, owner, key_field, attributes}]} ->
         {:ok, %{owner: owner, key_field: key_field, attributes: attributes}}
+
       {:atomic, []} ->
         {:error, :not_found}
+
       {:aborted, reason} ->
         {:error, reason}
     end
