@@ -31,24 +31,27 @@ mkdir -p "$INSTALL_DIR/bin"
 mkdir -p "$INSTALL_DIR/mnesia"
 mkdir -p "$RUN_DIR"
 
-# Build release
-echo "Building release..."
-MIX_ENV=prod mix deps.get --only prod
-MIX_ENV=prod mix release --overwrite
+# Build release (suppress verbose output)
+echo -n "Building release... "
+MIX_ENV=prod mix deps.get --only prod > /dev/null 2>&1
+MIX_ENV=prod mix release --overwrite > /dev/null 2>&1
+echo "done"
 
 # Install release
-echo "Installing release..."
+echo -n "Installing release... "
 cp -r _build/prod/rel/cortex/* "$INSTALL_DIR/bin/"
+echo "done"
 
 # Build escript CLI
-echo "Building CLI..."
-mix escript.build
+echo -n "Building CLI... "
+mix escript.build > /dev/null 2>&1
+echo "done"
 
 # Install CLI with setgid
 cp cortex "$BIN_DIR/cortex"
 chown root:cortex "$BIN_DIR/cortex"
 chmod 2755 "$BIN_DIR/cortex"
-echo "Installed CLI: $BIN_DIR/cortex (setgid cortex)"
+echo "Installed CLI to $BIN_DIR/cortex"
 
 # Set ownership
 chown -R cortex:cortex "$INSTALL_DIR"
