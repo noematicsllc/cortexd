@@ -42,9 +42,9 @@ echo -n "Installing release... "
 cp -r _build/prod/rel/cortex/* "$INSTALL_DIR/bin/"
 echo "done"
 
-# Build escript CLI
+# Build escript CLI (must use prod to get correct socket path)
 echo -n "Building CLI... "
-mix escript.build > /dev/null 2>&1
+MIX_ENV=prod mix escript.build > /dev/null 2>&1
 echo "done"
 
 # Install CLI
