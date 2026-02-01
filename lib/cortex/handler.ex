@@ -42,13 +42,15 @@ defmodule Cortex.Handler do
 
   @impl true
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    buffer = state.buffer <> data
+    # Check size before concatenating to avoid allocating oversized buffer
+    next_size = byte_size(state.buffer) + byte_size(data)
 
-    # Prevent memory exhaustion from large/incomplete messages
-    if byte_size(buffer) > @max_buffer_size do
+    if next_size > @max_buffer_size do
       Logger.warning("Buffer overflow, disconnecting client")
       {:stop, :buffer_overflow, state}
     else
+      buffer = state.buffer <> data
+
       case process_buffer(buffer, state.uid) do
         {:ok, response, rest} ->
           :gen_tcp.send(socket, response)

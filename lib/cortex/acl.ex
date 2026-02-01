@@ -94,11 +94,15 @@ defmodule Cortex.ACL do
 
   def parse_permissions(perms) when is_list(perms) do
     perms
-    |> Enum.map(fn
-      p when is_binary(p) -> p
-      p when is_atom(p) -> Atom.to_string(p)
+    |> Enum.reduce_while([], fn
+      p, acc when is_binary(p) -> {:cont, [p | acc]}
+      p, acc when is_atom(p) -> {:cont, [Atom.to_string(p) | acc]}
+      _p, _acc -> {:halt, :invalid}
     end)
-    |> parse_permission_list()
+    |> case do
+      :invalid -> {:error, :invalid_permissions}
+      list -> list |> Enum.reverse() |> parse_permission_list()
+    end
   end
 
   defp parse_permission_list(perms) do
