@@ -53,25 +53,27 @@ Implement **mTLS for node authentication** with a **federated identity registry*
 ### Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Cortex Mesh                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐          mTLS           ┌──────────────┐      │
-│  │  cortex-a    │◄────────────────────────►│  cortex-b    │      │
-│  │              │                          │              │      │
-│  │ Unix: UID    │                          │ Unix: UID    │      │
-│  │ TCP:  cert   │                          │ TCP:  cert   │      │
-│  │              │          mTLS            │              │      │
-│  └──────┬───────┘◄────────────────────────►└──────────────┘      │
-│         │                                          ▲              │
-│         │ mTLS                                     │              │
-│         ▼                                          │              │
-│  ┌──────────────┐                                  │              │
-│  │  cortex-c    │◄─────────────────────────────────┘              │
-│  └──────────────┘                                                │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+                          Cortex Mesh
+    +==============================================================+
+    |                                                              |
+    |   +--------------+        mTLS        +--------------+       |
+    |   |  cortex-a    |<------------------>|  cortex-b    |       |
+    |   |              |                    |              |       |
+    |   | Unix: UID    |                    | Unix: UID    |       |
+    |   | TCP:  cert   |                    | TCP:  cert   |       |
+    |   +--------------+        mTLS        +--------------+       |
+    |          ^    <-------------------------->   ^               |
+    |          |                                   |               |
+    |          | mTLS                              |               |
+    |          v                                   |               |
+    |   +--------------+                           |               |
+    |   |  cortex-c    |<--------------------------+               |
+    |   |              |                                           |
+    |   | Unix: UID    |                                           |
+    |   | TCP:  cert   |                                           |
+    |   +--------------+                                           |
+    |                                                              |
+    +==============================================================+
 ```
 
 ### Identity Layers
@@ -103,34 +105,26 @@ Both checks must pass for access to be granted.
 
 #### Examples
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Table: @alice:knowledge (public knowledge base)        │
-├─────────────────────────────────────────────────────────┤
-│  Identity ACL:     * → [:read]      (world readable)    │
-│                    alice → [:read, :write, :admin]      │
-│                                                         │
-│  Node Scope:       :all             (replicate everywhere)
-└─────────────────────────────────────────────────────────┘
+**Table: `@alice:knowledge`** (public knowledge base)
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Identity ACL | `* -> [:read]` | World readable |
+| | `alice -> [:read, :write, :admin]` | Owner has full access |
+| Node Scope | `:all` | Replicate everywhere |
 
-┌─────────────────────────────────────────────────────────┐
-│  Table: @alice:secrets (private, local only)            │
-├─────────────────────────────────────────────────────────┤
-│  Identity ACL:     alice → [:read, :write, :admin]      │
-│                                                         │
-│  Node Scope:       :local           (never leaves home) │
-└─────────────────────────────────────────────────────────┘
+**Table: `@alice:secrets`** (private, local only)
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Identity ACL | `alice -> [:read, :write, :admin]` | Owner only |
+| Node Scope | `:local` | Never leaves home node |
 
-┌─────────────────────────────────────────────────────────┐
-│  Table: @team:projects (shared, specific nodes)         │
-├─────────────────────────────────────────────────────────┤
-│  Identity ACL:     alice → [:read, :write, :admin]      │
-│                    bob → [:read, :write]                │
-│                    * → [:read]      (world readable)    │
-│                                                         │
-│  Node Scope:       ["home", "office"]  (team nodes only)│
-└─────────────────────────────────────────────────────────┘
-```
+**Table: `@team:projects`** (shared, specific nodes)
+| Setting | Value | Notes |
+|---------|-------|-------|
+| Identity ACL | `alice -> [:read, :write, :admin]` | Admin |
+| | `bob -> [:read, :write]` | Contributor |
+| | `* -> [:read]` | World readable |
+| Node Scope | `["home", "office"]` | Team nodes only |
 
 #### Authorization Flow
 
