@@ -102,14 +102,40 @@ Tables are namespaced by creator UID (`1000:users`). Users access their own tabl
 
 ## Agent Deployment
 
-Each AI agent runs as a dedicated system user:
+AI agents get isolated storage by running as separate Unix users. Each user's UID becomes their Cortex identity (kernel-enforced, cannot be spoofed).
+
+### With Claude Code Plugin (Recommended)
+
+Install the agent-identity plugin for easy agent management:
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin agent-coder
+# Copy plugin to your project
+cp -r /path/to/cortexd/plugins/agent-identity .claude/plugins/
+
+# Run setup (creates sudoers config, shows next steps)
+.claude/plugins/agent-identity/setup.sh
+```
+
+Then use the slash commands:
+
+```
+/spawn-agent agent-myproject-coder "Implement the new feature"
+/list-agents
+```
+
+See `plugins/agent-identity/README.md` for full setup instructions.
+
+### Manual Setup
+
+```bash
+# Create agent user
+sudo useradd -r -s /usr/sbin/nologin -G $(whoami) agent-coder
+
+# Run claude as agent (requires sudoers setup)
 sudo -u agent-coder claude -p "do agent stuff"
 ```
 
-The agent's UID becomes its Cortex identity automatically. No tokens or API keys needed.
+The agent's UID becomes its Cortex identity automatically.
 
 ## Usage Patterns
 
@@ -246,56 +272,54 @@ A release bundles the Erlang runtime with the application. The daemon runs witho
 
 ## Claude Code Integration
 
-Add this to your project's `CLAUDE.md` to enable Cortex usage:
+### Plugin Installation
+
+Copy the agent-identity plugin to your project:
+
+```bash
+mkdir -p .claude/plugins
+cp -r /path/to/cortexd/plugins/agent-identity .claude/plugins/
+```
+
+This provides:
+- `/spawn-agent <user> "task"` - Run a task as an isolated agent
+- `/list-agents` - List agents and their public tables
+
+### CLAUDE.md Template
+
+Add this to your project's `CLAUDE.md`:
 
 ~~~markdown
 ## Cortex (Local Storage)
 
-Cortex is a local storage daemon accessible via the `cortex` CLI. Data persists across sessions.
+Cortex provides persistent local storage via the `cortex` CLI.
 
-### Basic Operations
+### Quick Reference
 
 ```bash
-# Tables
 cortex tables                              # List your tables
-cortex create_table NAME key,field1,field2 # First field is primary key
-cortex drop_table NAME
-
-# Records
-cortex put TABLE '{"key":"k1","field1":"value"}'
-cortex get TABLE k1
-cortex delete TABLE k1
-cortex query TABLE '{"field1":"value"}'    # Pattern match (scans table)
-cortex all TABLE
-
-# Access control
-cortex acl grant uid:NUMBER TABLE read,write
-cortex acl grant '*' TABLE read            # World-readable
-cortex acl list
+cortex create_table NAME key,field1,field2 # Create table (first field = primary key)
+cortex put TABLE '{"key":"k1",...}'        # Insert/update record
+cortex get TABLE k1                        # Get by key
+cortex query TABLE '{"field":"value"}'     # Pattern match
+cortex all TABLE                           # List all records
+cortex acl grant '*' TABLE read            # Make world-readable
 ```
 
-### Agent Memory Pattern
-
-Use private tables for internal state and public tables for shared knowledge:
+### Memory Pattern
 
 ```bash
-# Setup (once)
-cortex create_table private id,type,content,ts
+# Setup (once per agent)
+cortex create_table memories id,type,content,ts
 cortex create_table public id,type,content,ts
 cortex acl grant '*' public read
 
-# Store private context
-cortex put private '{"id":"ctx-1","type":"context","content":"Working on...","ts":1234567890}'
-
-# Share discoveries
-cortex put public '{"id":"fact-1","type":"fact","content":"Learned that...","ts":1234567890}'
-
-# Query by type
-cortex query private '{"type":"context"}'
-cortex query public '{"type":"fact"}'
+# Store memories
+cortex put memories '{"id":"m1","type":"context","content":"...","ts":1234567890}'
+cortex put public '{"id":"p1","type":"fact","content":"...","ts":1234567890}'
 ```
 
-Tables are namespaced by UID automatically. Your identity comes from the Unix user running the command.
+Identity is automatic (Unix UID). Tables are namespaced per user.
 ~~~
 
 ## Future Work
