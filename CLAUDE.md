@@ -90,7 +90,7 @@ Methods: `ping`, `status`, `tables`, `create_table`, `drop_table`, `put`, `get`,
 - `sm_instances` - workflow instances
 - `commands` - documented query templates
 
-See PLANNING.md for full details.
+See README.md for full examples.
 
 ## File Locations
 
