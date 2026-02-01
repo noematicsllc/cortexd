@@ -1,0 +1,45 @@
+defmodule Cortex.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :cortex,
+      version: "0.1.0",
+      elixir: "~> 1.17",
+      start_permanent: Mix.env() == :prod,
+      compilers: [:elixir_make] ++ Mix.compilers(),
+      make_targets: ["all"],
+      make_clean: ["clean"],
+      deps: deps(),
+      escript: escript(),
+      releases: releases()
+    ]
+  end
+
+  def application do
+    [
+      extra_applications: [:logger, :mnesia],
+      mod: {Cortex.Application, []}
+    ]
+  end
+
+  defp deps do
+    [
+      {:msgpax, "~> 2.4"},
+      {:jason, "~> 1.4"},
+      {:elixir_make, "~> 0.8", runtime: false}
+    ]
+  end
+
+  defp escript do
+    [main_module: Cortex.CLI, app: nil]
+  end
+
+  defp releases do
+    [
+      cortex: [
+        applications: [cortex: :permanent]
+      ]
+    ]
+  end
+end

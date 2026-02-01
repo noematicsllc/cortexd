@@ -1,62 +1,67 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
 ## Project Overview
 
-Cortex is a distributed storage daemon for local-first applications. It provides a mesh-networked Mnesia database accessible via Unix socket, TCP, or CLI. The project is in early development (Phase 1).
+Cortex is a local storage daemon providing an embedded Mnesia database accessible via Unix socket or CLI. Version 1 focuses on single-machine operation.
 
 **Core philosophy:** Infrastructure, not framework. Generic storage primitives with no opinions on schema or usage patterns.
 
 ## Technology Stack
 
-- **Language:** Elixir (OTP supervision, distribution, Mnesia access)
-- **Database:** Mnesia (embedded, distributed replication built-in)
-- **IPC:** Unix socket + MessagePack-RPC (local), TCP + MessagePack (remote)
-- **Distribution:** Erlang clustering for mesh networking
-- **Packaging:** Mix release (self-contained binary)
+- **Language:** Elixir (OTP supervision, Mnesia access)
+- **Database:** Mnesia (embedded, transactions, pattern matching)
+- **IPC:** Unix socket + MessagePack-RPC
+- **Socket:** `gen_tcp` with local address family
+- **Auth:** UID-based via SO_PEERCRED/getpeereid (kernel-enforced, cross-platform NIF)
+- **Packaging:** Mix release + escript CLI
 
 ## Build Commands
 
 ```bash
-# Build release
-MIX_ENV=prod mix release
-
-# Development
-mix deps.get
-mix compile
-mix test
-
-# Install (system service)
-sudo ./install.sh
-
-# Install (user service, no root)
-./install.sh --user
+mix deps.get              # Get dependencies
+mix compile               # Compile
+mix test                  # Run tests
+MIX_ENV=prod mix release  # Build release
+sudo ./install.sh         # Install system service
 ```
 
 ## Architecture
 
 ```
-App / CLI → Unix socket / TCP → cortexd daemon → Mnesia (embedded)
-                                       ↓
-                              Erlang distribution → mesh peers
+App / CLI → Unix socket → cortexd → Mnesia
 ```
 
-### Key Modules (planned structure)
+### Key Modules
 
-- `lib/cortex/store.ex` - Mnesia operations (create_table, put, get, delete, match, all)
-- `lib/cortex/server/unix_socket.ex` - Local MessagePack-RPC server
-- `lib/cortex/server/tcp.ex` - Remote TLS server
-- `lib/cortex/auth/` - UID-based local identity, tokens, ACLs
-- `lib/cortex/cluster/` - Erlang clustering, mTLS for mesh peers
+- `lib/cortex/store.ex` - Mnesia operations
+- `lib/cortex/server.ex` - Socket accept loop (`gen_tcp`)
+- `lib/cortex/handler.ex` - Connection handler (DynamicSupervisor child)
+- `lib/cortex/protocol.ex` - MessagePack-RPC
+- `lib/cortex/identity.ex` - UID extraction via peercred NIF
+- `lib/cortex/peercred.ex` - NIF wrapper for peer credentials
+- `lib/cortex/acl.ex` - Per-table access control
+- `lib/cortex/client.ex` - Client for CLI
 - `lib/cortex/cli.ex` - CLI interface
+- `c_src/peercred_nif.c` - Cross-platform peercred NIF (Linux + macOS)
 
 ### Security Model
 
-- **Local identity:** UID-based via `SO_PEERCRED` (kernel-enforced, no tokens needed)
-- **Remote identity:** Bearer tokens or client certificates
-- **Transport:** TLS for TCP connections, Unix sockets use kernel access control
-- **Data access:** Per-table ACLs attached to identity
+- **Identity:** UID via peer credentials (kernel-enforced, no tokens; Linux + macOS)
+- **Namespacing:** Tables prefixed with creator UID internally (`1000:users`)
+- **Access:** Per-table ACLs (read, write, admin)
+- **World access:** Special `*` identity for public tables
+- **Socket:** Accessible only via CLI (setgid `cortex`)
+
+### Agent Deployment
+
+Each AI agent runs as a dedicated system user:
+```bash
+sudo useradd -r -s /usr/sbin/nologin agent-coder
+sudo -u agent-coder claude -p "do agent stuff"
+```
+The agent's UID becomes its Cortex identity automatically.
 
 ## RPC Protocol
 
@@ -64,18 +69,40 @@ MessagePack-RPC format:
 - Request: `[0, msgid, method, params]`
 - Response: `[1, msgid, error, result]`
 
-Core methods: `ping`, `status`, `create_table`, `put`, `get`, `delete`, `match`, `all`
-Mesh methods: `cluster_status`, `cluster_connect`, `cluster_disconnect`, `query_mesh`
+Methods: `ping`, `status`, `tables`, `create_table`, `drop_table`, `put`, `get`, `delete`, `match`, `all`, `acl_grant`, `acl_revoke`, `acl_list`
+
+## Data Model
+
+- Records stored as `{table_atom, key, data_map}` tuples
+- First attribute in `create_table` is the primary key field
+- Remaining attributes are documentation only (not enforced)
+- `match` operations scan the table (no secondary indexes in v1)
+- ACLs stored in system Mnesia table `cortex_acls`
+
+## Usage Patterns
+
+**Agent Memory** - Public and private memories for AI agents:
+- `{agent}_private` - internal state, owner only
+- `{agent}_public` - shared knowledge, world-readable
+
+**State Machine + Commands** - Workflows with discoverable command templates:
+- `sm_definitions` - state machine schemas
+- `sm_instances` - workflow instances
+- `commands` - documented query templates
+
+See PLANNING.md for full details.
 
 ## File Locations
 
-**System service:**
-- Binary: `/usr/local/bin/cortex`
-- Data: `/var/lib/cortex/`
-- Socket: `/run/cortex/cortex.sock`
-- Config: `/etc/cortex/`
+- **CLI:** `/usr/local/bin/cortex` (setgid cortex)
+- **Daemon:** `/var/lib/cortex/bin/`
+- **Socket:** `/run/cortex/cortex.sock` (mode 0660)
+- **Data:** `/var/lib/cortex/mnesia/`
 
-**User service:**
-- Data: `~/.local/share/cortex/`
-- Socket: `~/.local/run/cortex.sock`
-- Config: `~/.config/cortex/`
+## Future Work (v2+)
+
+- TCP/remote access
+- Mesh networking
+- Certificates / mTLS
+- Token authentication
+- Backup/export
