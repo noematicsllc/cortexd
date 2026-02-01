@@ -38,7 +38,10 @@ defmodule Cortex.MixProject do
   defp releases do
     [
       cortex: [
-        applications: [cortex: :permanent]
+        applications: [
+          mnesia: :load,      # Include but don't start - we start it manually
+          cortex: :permanent
+        ]
       ]
     ]
   end

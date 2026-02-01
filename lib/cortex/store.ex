@@ -22,8 +22,11 @@ defmodule Cortex.Store do
   end
 
   defp setup_mnesia do
-    # Load Mnesia application (but don't start it yet)
-    :ok = Application.load(:mnesia)
+    # Ensure Mnesia application is loaded (but don't start it yet)
+    case Application.load(:mnesia) do
+      :ok -> :ok
+      {:error, {:already_loaded, :mnesia}} -> :ok
+    end
 
     # Configure directory before starting
     data_dir = Cortex.data_dir() |> String.to_charlist()
