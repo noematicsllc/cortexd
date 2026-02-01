@@ -8,8 +8,9 @@ defmodule Cortex.Application do
     children = [
       # Initialize Mnesia
       Cortex.Store,
-      # DynamicSupervisor for connection handlers
-      {DynamicSupervisor, name: Cortex.HandlerSupervisor, strategy: :one_for_one},
+      # DynamicSupervisor for connection handlers (max 1000 concurrent connections)
+      {DynamicSupervisor,
+       name: Cortex.HandlerSupervisor, strategy: :one_for_one, max_children: 1000},
       # Unix socket accept loop
       Cortex.Server
     ]

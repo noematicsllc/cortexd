@@ -101,16 +101,17 @@ defmodule Cortex.Store do
   def drop_table(owner_uid, name) do
     table_name = namespaced_table(owner_uid, name)
 
+    # Clean up metadata and ACLs BEFORE deleting table to avoid race conditions.
+    # This ensures no orphaned ACLs can persist if a grant happens mid-deletion.
+    :mnesia.transaction(fn ->
+      :mnesia.delete({@meta_table, table_name})
+
+      :mnesia.match_object({@acl_table, {:_, table_name}, :_})
+      |> Enum.each(fn {_, key, _} -> :mnesia.delete({@acl_table, key}) end)
+    end)
+
     case :mnesia.delete_table(table_name) do
       {:atomic, :ok} ->
-        # Clean up metadata and ACLs
-        :mnesia.transaction(fn ->
-          :mnesia.delete({@meta_table, table_name})
-          # Delete all ACLs for this table
-          :mnesia.match_object({@acl_table, {:_, table_name}, :_})
-          |> Enum.each(fn {_, key, _} -> :mnesia.delete({@acl_table, key}) end)
-        end)
-
         :ok
 
       {:aborted, {:no_exists, ^table_name}} ->
