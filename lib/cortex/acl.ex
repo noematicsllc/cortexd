@@ -16,6 +16,11 @@ defmodule Cortex.ACL do
   - :write - put, delete
   - :admin - acl_grant, acl_revoke, drop_table
   """
+  def authorize(_uid, :table_does_not_exist, _operation) do
+    # Table atom doesn't exist - return same error as unauthorized (no info leak)
+    {:error, :access_denied}
+  end
+
   def authorize(uid, table_name, operation) do
     # Root (UID 0) bypasses all ACL checks. This enables:
     # - Admin backup/recovery of all data
@@ -39,13 +44,20 @@ defmodule Cortex.ACL do
 
       {:ok, _meta} ->
         # Not owner, check ACLs
-        permission = operation_to_permission(operation)
+        case operation_to_permission(operation) do
+          {:error, :unknown_operation} ->
+            # Log and deny - don't crash the handler
+            require Logger
+            Logger.error("Unknown operation in ACL check: #{inspect(operation)}")
+            {:error, :access_denied}
 
-        case Store.acl_check(identity, table_name, permission) do
-          {:ok, true} -> :ok
-          # Uniform error prevents table existence probing
-          {:ok, false} -> {:error, :access_denied}
-          error -> error
+          permission ->
+            case Store.acl_check(identity, table_name, permission) do
+              {:ok, true} -> :ok
+              # Uniform error prevents table existence probing
+              {:ok, false} -> {:error, :access_denied}
+              error -> error
+            end
         end
 
       {:error, :not_found} ->
@@ -63,38 +75,54 @@ defmodule Cortex.ACL do
   """
   def can_create_table?(_uid), do: true
 
+  @valid_permissions %{
+    "read" => :read,
+    "write" => :write,
+    "admin" => :admin
+  }
+
   @doc """
   Parse permission strings into atoms.
+  Only allows known permissions to prevent atom exhaustion.
   """
   def parse_permissions(perms) when is_binary(perms) do
     perms
     |> String.split(",")
     |> Enum.map(&String.trim/1)
-    |> Enum.map(&String.to_atom/1)
-    |> validate_permissions()
+    |> parse_permission_list()
   end
 
   def parse_permissions(perms) when is_list(perms) do
     perms
-    |> Enum.map(fn
-      p when is_binary(p) -> String.to_atom(p)
-      p when is_atom(p) -> p
+    |> Enum.reduce_while([], fn
+      p, acc when is_binary(p) -> {:cont, [p | acc]}
+      p, acc when is_atom(p) -> {:cont, [Atom.to_string(p) | acc]}
+      _p, _acc -> {:halt, :invalid}
     end)
-    |> validate_permissions()
+    |> case do
+      :invalid -> {:error, :invalid_permissions}
+      list -> list |> Enum.reverse() |> parse_permission_list()
+    end
   end
 
-  defp validate_permissions(perms) do
-    valid = [:read, :write, :admin]
+  defp parse_permission_list(perms) do
+    result =
+      Enum.reduce_while(perms, [], fn perm, acc ->
+        case Map.fetch(@valid_permissions, perm) do
+          {:ok, atom} -> {:cont, [atom | acc]}
+          :error -> {:halt, :invalid}
+        end
+      end)
 
-    if Enum.all?(perms, &(&1 in valid)) do
-      {:ok, perms}
-    else
-      {:error, :invalid_permissions}
+    case result do
+      :invalid -> {:error, :invalid_permissions}
+      list -> {:ok, Enum.reverse(list)}
     end
   end
 
   defp operation_to_permission(op) when op in [:get, :match, :all], do: :read
   defp operation_to_permission(op) when op in [:put, :delete], do: :write
   defp operation_to_permission(op) when op in [:acl_grant, :acl_revoke, :drop_table], do: :admin
-  defp operation_to_permission(_), do: :read
+  # Return error for unknown operations rather than crashing the handler
+  defp operation_to_permission(_op), do: {:error, :unknown_operation}
 end

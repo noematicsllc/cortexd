@@ -10,6 +10,12 @@ defmodule Cortex.Handler do
 
   alias Cortex.{Protocol, Store, ACL, Identity}
 
+  # Max buffer size to prevent memory exhaustion (1MB)
+  @max_buffer_size 1_048_576
+
+  # Valid pattern for table/attribute names (alphanumeric + underscore, starts with letter/underscore)
+  @valid_name_pattern ~r/^[a-zA-Z_][a-zA-Z0-9_]*$/
+
   defstruct [:socket, :uid, :buffer]
 
   def start_link(socket) do
@@ -36,21 +42,29 @@ defmodule Cortex.Handler do
 
   @impl true
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    buffer = state.buffer <> data
+    # Check size before concatenating to avoid allocating oversized buffer
+    next_size = byte_size(state.buffer) + byte_size(data)
 
-    case process_buffer(buffer, state.uid) do
-      {:ok, response, rest} ->
-        :gen_tcp.send(socket, response)
-        :inet.setopts(socket, [{:active, :once}])
-        {:noreply, %{state | buffer: rest}}
+    if next_size > @max_buffer_size do
+      Logger.warning("Buffer overflow, disconnecting client")
+      {:stop, :buffer_overflow, state}
+    else
+      buffer = state.buffer <> data
 
-      {:incomplete, buffer} ->
-        :inet.setopts(socket, [{:active, :once}])
-        {:noreply, %{state | buffer: buffer}}
+      case process_buffer(buffer, state.uid) do
+        {:ok, response, rest} ->
+          :gen_tcp.send(socket, response)
+          :inet.setopts(socket, [{:active, :once}])
+          {:noreply, %{state | buffer: rest}}
 
-      {:error, reason} ->
-        Logger.warning("Protocol error: #{inspect(reason)}")
-        {:stop, :protocol_error, state}
+        {:incomplete, buffer} ->
+          :inet.setopts(socket, [{:active, :once}])
+          {:noreply, %{state | buffer: buffer}}
+
+        {:error, reason} ->
+          Logger.warning("Protocol error: #{inspect(reason)}")
+          {:stop, :protocol_error, state}
+      end
     end
   end
 
@@ -116,15 +130,21 @@ defmodule Cortex.Handler do
 
   defp dispatch("create_table", [name, attributes], uid)
        when is_binary(name) and is_list(attributes) do
-    attrs =
-      Enum.map(attributes, fn
-        a when is_binary(a) -> String.to_atom(a)
-        a when is_atom(a) -> a
-      end)
+    # Validate table name format
+    if not valid_name?(name) do
+      {:error, "invalid table name: must be alphanumeric with underscores"}
+    else
+      # Validate and convert attribute names (prevents atom exhaustion)
+      case validate_and_convert_attrs(attributes) do
+        {:ok, attrs} ->
+          case Store.create_table(uid, name, attrs) do
+            {:ok, _table_name} -> {:ok, "created"}
+            error -> error
+          end
 
-    case Store.create_table(uid, name, attrs) do
-      {:ok, _table_name} -> {:ok, "created"}
-      error -> error
+        {:error, _} = error ->
+          error
+      end
     end
   end
 
@@ -225,5 +245,39 @@ defmodule Cortex.Handler do
 
   defp dispatch(method, _params, _uid) do
     {:error, "unknown method: #{method}"}
+  end
+
+  # Validate name format (alphanumeric + underscore, starts with letter/underscore)
+  defp valid_name?(name) when is_binary(name) do
+    Regex.match?(@valid_name_pattern, name)
+  end
+
+  # Validate and convert attribute names to atoms (prevents atom exhaustion)
+  defp validate_and_convert_attrs(attributes) do
+    result =
+      Enum.reduce_while(attributes, [], fn attr, acc ->
+        name =
+          case attr do
+            a when is_binary(a) -> a
+            a when is_atom(a) -> Atom.to_string(a)
+            _ -> nil
+          end
+
+        cond do
+          name == nil ->
+            {:halt, {:error, "invalid attribute type"}}
+
+          not valid_name?(name) ->
+            {:halt, {:error, "invalid attribute name: #{name}"}}
+
+          true ->
+            {:cont, [String.to_atom(name) | acc]}
+        end
+      end)
+
+    case result do
+      {:error, _} = error -> error
+      attrs -> {:ok, Enum.reverse(attrs)}
+    end
   end
 end
