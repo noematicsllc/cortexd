@@ -199,6 +199,60 @@ mix test
 | `/var/lib/cortex/mnesia/` | Data directory |
 | `/run/cortex/cortex.sock` | Unix socket |
 
+## Claude Code Integration
+
+Add this to your project's `CLAUDE.md` to enable Cortex usage:
+
+~~~markdown
+## Cortex (Local Storage)
+
+Cortex is a local storage daemon accessible via the `cortex` CLI. Data persists across sessions.
+
+### Basic Operations
+
+```bash
+# Tables
+cortex tables                              # List your tables
+cortex create_table NAME key,field1,field2 # First field is primary key
+cortex drop_table NAME
+
+# Records
+cortex put TABLE '{"key":"k1","field1":"value"}'
+cortex get TABLE k1
+cortex delete TABLE k1
+cortex query TABLE '{"field1":"value"}'    # Pattern match (scans table)
+cortex all TABLE
+
+# Access control
+cortex acl grant uid:NUMBER TABLE read,write
+cortex acl grant '*' TABLE read            # World-readable
+cortex acl list
+```
+
+### Agent Memory Pattern
+
+Use private tables for internal state and public tables for shared knowledge:
+
+```bash
+# Setup (once)
+cortex create_table private id,type,content,ts
+cortex create_table public id,type,content,ts
+cortex acl grant '*' public read
+
+# Store private context
+cortex put private '{"id":"ctx-1","type":"context","content":"Working on...","ts":1234567890}'
+
+# Share discoveries
+cortex put public '{"id":"fact-1","type":"fact","content":"Learned that...","ts":1234567890}'
+
+# Query by type
+cortex query private '{"type":"context"}'
+cortex query public '{"type":"fact"}'
+```
+
+Tables are namespaced by UID automatically. Your identity comes from the Unix user running the command.
+~~~
+
 ## Future Work
 
 - TCP/remote access
