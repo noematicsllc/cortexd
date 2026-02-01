@@ -331,14 +331,20 @@ defmodule Cortex.Store do
   # Helpers
 
   def resolve_table(uid, name) do
-    cond do
-      # Fully qualified name (e.g., "1000:users")
-      String.contains?(name, ":") ->
-        String.to_atom(name)
+    table_str =
+      if String.contains?(name, ":") do
+        # Fully qualified name (e.g., "1000:users")
+        name
+      else
+        # Short name - use caller's namespace
+        "#{uid}:#{name}"
+      end
 
-      # Short name - use caller's namespace
-      true ->
-        namespaced_table(uid, name)
+    # Use existing atom to prevent atom exhaustion from probing non-existent tables
+    try do
+      String.to_existing_atom(table_str)
+    rescue
+      ArgumentError -> :table_does_not_exist
     end
   end
 
