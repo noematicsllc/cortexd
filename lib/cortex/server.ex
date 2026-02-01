@@ -34,8 +34,8 @@ defmodule Cortex.Server do
 
     case :gen_tcp.listen(0, opts) do
       {:ok, listen_socket} ->
-        # Set socket permissions (0660)
-        File.chmod!(socket_path, 0o660)
+        # Set socket permissions (world-accessible, security via SO_PEERCRED + ACLs)
+        File.chmod!(socket_path, 0o666)
 
         Logger.info("Listening on #{socket_path}")
 

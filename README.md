@@ -61,24 +61,22 @@ Tables are namespaced by creator UID (`1000:users`). Users access their own tabl
 
 ## Security Model
 
-- **Identity**: UID extracted via SO_PEERCRED/getpeereid (kernel-enforced)
+- **Identity**: UID extracted via SO_PEERCRED/getpeereid (kernel-enforced, cannot be spoofed)
 - **Namespacing**: Tables prefixed with creator UID internally
 - **Permissions**: Per-table ACLs (read, write, admin)
 - **World access**: Special `*` identity for public tables
-- **Socket**: Mode 0660, accessible via setgid CLI
+- **Socket**: Mode 0666 (any local user can connect; security enforced by ACLs)
 
 ## Agent Deployment
 
-Each AI agent runs as a dedicated system user in the `cortex` group:
+Each AI agent runs as a dedicated system user:
 
 ```bash
-sudo useradd -r -s /usr/sbin/nologin -G cortex agent-coder
+sudo useradd -r -s /usr/sbin/nologin agent-coder
 sudo -u agent-coder claude -p "do agent stuff"
 ```
 
 The agent's UID becomes its Cortex identity automatically. No tokens or API keys needed.
-
-**Note:** Users must be in the `cortex` group to access the daemon. The install script adds the installing user automatically. For additional users: `sudo usermod -a -G cortex USERNAME` (log out/in to take effect).
 
 ## Usage Patterns
 

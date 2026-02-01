@@ -48,20 +48,20 @@ App / CLI → Unix socket → cortexd → Mnesia
 
 ### Security Model
 
-- **Identity:** UID via peer credentials (kernel-enforced, no tokens; Linux + macOS)
+- **Identity:** UID via peer credentials (kernel-enforced, cannot be spoofed; Linux + macOS)
 - **Namespacing:** Tables prefixed with creator UID internally (`1000:users`)
 - **Access:** Per-table ACLs (read, write, admin)
 - **World access:** Special `*` identity for public tables
-- **Socket:** Accessible only via CLI (setgid `cortex`)
+- **Socket:** Mode 0666 (any local user can connect; security enforced by ACLs)
 
 ### Agent Deployment
 
-Each AI agent runs as a dedicated system user in the `cortex` group:
+Each AI agent runs as a dedicated system user:
 ```bash
-sudo useradd -r -s /usr/sbin/nologin -G cortex agent-coder
+sudo useradd -r -s /usr/sbin/nologin agent-coder
 sudo -u agent-coder claude -p "do agent stuff"
 ```
-The agent's UID becomes its Cortex identity automatically. Users must be in the `cortex` group to access the daemon.
+The agent's UID becomes its Cortex identity automatically.
 
 ## RPC Protocol
 

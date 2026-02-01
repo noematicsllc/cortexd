@@ -26,14 +26,6 @@ if ! getent passwd cortex > /dev/null; then
     echo "Created user: cortex"
 fi
 
-# Add the installing user to the cortex group
-if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
-    if ! groups "$SUDO_USER" | grep -q '\bcortex\b'; then
-        usermod -a -G cortex "$SUDO_USER"
-        echo "Added $SUDO_USER to cortex group (log out and back in to take effect)"
-    fi
-fi
-
 # Create directories
 mkdir -p "$INSTALL_DIR/bin"
 mkdir -p "$INSTALL_DIR/mnesia"
@@ -55,10 +47,9 @@ echo -n "Building CLI... "
 mix escript.build > /dev/null 2>&1
 echo "done"
 
-# Install CLI with setgid
+# Install CLI
 cp cortex "$BIN_DIR/cortex"
-chown root:cortex "$BIN_DIR/cortex"
-chmod 2755 "$BIN_DIR/cortex"
+chmod 755 "$BIN_DIR/cortex"
 echo "Installed CLI to $BIN_DIR/cortex"
 
 # Set ownership
