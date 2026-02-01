@@ -78,6 +78,102 @@ sudo -u agent-coder claude -p "do agent stuff"
 
 The agent's UID becomes its Cortex identity automatically. No tokens or API keys needed.
 
+## Usage Patterns
+
+### Agent Memory (Public + Private)
+
+A common pattern for AI agents: maintain both shared knowledge and private state.
+
+```bash
+# Agent creates its memory tables
+cortex create_table private id,type,content,ts
+cortex create_table public id,type,content,ts
+
+# Make public memory world-readable
+cortex acl grant '*' public read
+```
+
+**Private memory** - internal state, scratchpad, credentials:
+
+```bash
+cortex put private '{"id":"task-ctx-1","type":"context","content":"Working on auth bug","ts":1706745600}'
+```
+
+**Public memory** - shared facts, discoveries, learned patterns:
+
+```bash
+cortex put public '{"id":"fact-1","type":"fact","content":"Rust async functions return impl Future","ts":1706745600}'
+```
+
+**Cross-agent sharing** - other agents can read public memories:
+
+```bash
+# Agent 2002 reads Agent 2001's public memories
+cortex query 2001:public '{"type":"fact"}'
+```
+
+### State Machine + Commands
+
+Define workflows and discoverable command templates using Cortex primitives.
+
+```bash
+# Create schema tables
+cortex create_table sm_definitions id,states,transitions,initial
+cortex create_table sm_instances id,machine,state,data,updated
+cortex create_table commands id,scope,description,usage,example
+
+# Make commands discoverable
+cortex acl grant '*' commands read
+cortex acl grant '*' sm_definitions read
+```
+
+**Define a workflow:**
+
+```bash
+cortex put sm_definitions '{
+  "id": "order",
+  "states": ["pending", "paid", "shipped", "delivered", "cancelled"],
+  "transitions": {"pending":["paid","cancelled"],"paid":["shipped","cancelled"],"shipped":["delivered"]},
+  "initial": "pending"
+}'
+```
+
+**Create and advance instances:**
+
+```bash
+# Create instance
+cortex put sm_instances '{"id":"order-123","machine":"order","state":"pending","data":{},"updated":1706745600}'
+
+# Advance state
+cortex put sm_instances '{"id":"order-123","state":"paid","updated":1706746000}'
+
+# Query by state
+cortex query sm_instances '{"machine":"order","state":"pending"}'
+```
+
+**Document commands:**
+
+```bash
+cortex put commands '{
+  "id": "sm:new",
+  "scope": "sm",
+  "description": "Create a new state machine instance",
+  "usage": "sm:new <machine> <instance_id>",
+  "example": "cortex put sm_instances {\"id\":\"order-123\",\"machine\":\"order\",\"state\":\"pending\",...}"
+}'
+
+# Discover available commands
+cortex query commands '{"scope":"sm"}'
+```
+
+### Namespace Convention
+
+| Pattern | Example | Access |
+|---------|---------|--------|
+| `{agent}_private` | `coder_private` | Owner only |
+| `{agent}_public` | `coder_public` | Owner writes, world reads |
+| `shared_{topic}` | `shared_codebase` | Designated writers, world reads |
+
 ## Platform Support
 
 | Platform | Status | Notes |
