@@ -98,6 +98,7 @@ Tables are namespaced by creator UID (`1000:users`). Users access their own tabl
 - **Namespacing**: Tables prefixed with creator UID internally
 - **Permissions**: Per-table ACLs (read, write, admin)
 - **World access**: Special `*` identity for public tables
+- **Root access**: UID 0 bypasses all ACL checks (for admin backup/recovery and agent auditing)
 - **Socket**: Mode 0666 (any local user can connect; security enforced by ACLs)
 
 ## Agent Deployment

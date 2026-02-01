@@ -17,7 +17,10 @@ defmodule Cortex.ACL do
   - :admin - acl_grant, acl_revoke, drop_table
   """
   def authorize(uid, table_name, operation) do
-    # Root bypasses all ACL checks
+    # Root (UID 0) bypasses all ACL checks. This enables:
+    # - Admin backup/recovery of all data
+    # - Auditing agent activity across all tables
+    # - Emergency data access without per-table grants
     if uid == 0 do
       :ok
     else

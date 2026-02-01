@@ -52,6 +52,7 @@ App / CLI → Unix socket → cortexd → Mnesia
 - **Namespacing:** Tables prefixed with creator UID internally (`1000:users`)
 - **Access:** Per-table ACLs (read, write, admin)
 - **World access:** Special `*` identity for public tables
+- **Root access:** UID 0 bypasses all ACL checks (for backup/recovery and agent auditing)
 - **Socket:** Mode 0666 (any local user can connect; security enforced by ACLs)
 
 ### Agent Deployment
