@@ -16,27 +16,21 @@ A local storage daemon providing an embedded Mnesia database accessible via Unix
 
 ### Option 1: Pre-built Binaries (Recommended)
 
-Download from [GitHub Releases](https://github.com/rynmrtn/cortexd/releases):
+One-line install (Linux/macOS):
 
 ```bash
-# Download daemon (includes bundled Erlang runtime)
-curl -LO https://github.com/rynmrtn/cortexd/releases/latest/download/cortexd-0.1.0-alpha-linux-x86_64.tar.gz
-tar -xzf cortexd-*.tar.gz
-
-# Download CLI (standalone, no dependencies)
-sudo curl -L -o /usr/local/bin/cortex \
-  https://github.com/rynmrtn/cortexd/releases/latest/download/cortex-linux-x86_64
-sudo chmod +x /usr/local/bin/cortex
-
-# Install daemon
-sudo mkdir -p /var/lib/cortex
-sudo mv cortex /var/lib/cortex/bin
-sudo useradd -r -g nogroup -d /var/lib/cortex -s /usr/sbin/nologin cortex 2>/dev/null || true
-sudo chown -R cortex:nogroup /var/lib/cortex
-
-# Test
-cortex --version
+curl -fsSL https://raw.githubusercontent.com/noematicsllc/cortexd/main/install-binary.sh | sudo bash
 ```
+
+This auto-detects your platform and installs both the daemon and CLI.
+
+To install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/noematicsllc/cortexd/main/install-binary.sh | sudo CORTEX_VERSION=0.1.0-alpha bash
+```
+
+Or download manually from [GitHub Releases](https://github.com/noematicsllc/cortexd/releases).
 
 ### Option 2: Build from Source
 
