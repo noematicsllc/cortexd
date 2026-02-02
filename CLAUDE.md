@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code when working with code in this repository.
 
+## Session Start
+
+At the start of each session, check cortex for context:
+
+```bash
+cortex all guidelines          # Rules and preferences (filter by scope: global + cortexd)
+cortex all cortexd             # Project-specific context and status
+cortex all public_memories     # Shared preferences (sub-agents can see these)
+```
+
+Store learnings, decisions, and status updates back to cortex as you work. This avoids repeating context across sessions and keeps the filesystem clean.
+
 ## Project Overview
 
 Cortex is a local storage daemon providing an embedded Mnesia database accessible via Unix socket or CLI. Version 1 focuses on single-machine operation.
@@ -103,8 +115,8 @@ See README.md for full examples.
 
 ## Future Work (v2+)
 
-- TCP/remote access
-- Mesh networking
-- Certificates / mTLS
+See `docs/adr/001-mesh-networking.md` for the mesh networking design:
+- TCP/remote access with mTLS
+- Federated identity (cross-node UID linking)
+- Node scope for replication control
 - Token authentication
-- Backup/export
