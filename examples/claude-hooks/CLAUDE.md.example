@@ -1,0 +1,71 @@
+# Global Claude Code Instructions
+
+## Cortex Integration
+
+Cortex is a local storage daemon for persistent agent memory. Hooks automatically inject context at session start and capture learnings.
+
+### What Hooks Do (No Action Required)
+
+- **SessionStart**: Injects `cortex get {project} status-current` into context
+- **UserPromptSubmit**: Retrieves relevant decisions/corrections/patterns, captures new ones
+- **Stop**: Extracts learnings/outcomes from the conversation turn
+- **SessionEnd**: Writes handoff note for next session
+
+The project name is derived from the git repository name.
+
+### Manual Usage (Optional)
+
+```bash
+# Query for context before making decisions
+cortex query {project} '{"type":"decision"}'
+cortex query {project} '{"type":"correction"}'
+
+# Store important knowledge
+cortex put {project} '{"id":"decision-X","type":"decision","content":"...","date":"YYYY-MM-DD"}'
+cortex put {project} '{"id":"insight-X","type":"insight","content":"...","date":"YYYY-MM-DD"}'
+
+# Check status
+cortex get {project} status-current
+
+# Find patterns
+cortex query public_memories '{"type":"pattern"}'
+```
+
+### Record Types
+
+| Type | When to Store | Key Fields |
+|------|---------------|------------|
+| `decision` | Chose between alternatives | outcome, reasoning, context |
+| `correction` | User corrected misunderstanding | wrong_understanding, correct_understanding, insight |
+| `insight` | Non-obvious discovery | content, context, implications |
+| `outcome` | Completed work with lessons | task, worked, failed, learned |
+| `learning` | Discovery worth remembering | insight, topic |
+| `status` | Current project state | active_work, handoff_note, project_phase |
+
+### Guidelines and Patterns
+
+```bash
+# Global rules
+cortex query guidelines '{"scope":"global"}'
+
+# Project-specific rules
+cortex query guidelines '{"scope":"{project}"}'
+
+# Find reusable patterns
+cortex query public_memories '{"type":"pattern"}'
+```
+
+### Ralph Integration (Iterative PRD)
+
+For multi-iteration PRD execution with persistent memory:
+```bash
+cortex query public_memories '{"name":"Ralph Cortex Integration"}'
+```
+Script at: `cortexd/examples/ralph-cortex.sh`
+
+### Philosophy
+
+- Store outcomes and lessons, not just facts
+- Query before making choices (check past decisions)
+- Record failures and why they failed
+- The goal is better judgment over time, not just context
