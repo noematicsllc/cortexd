@@ -181,6 +181,13 @@ defmodule Cortex.Store do
     |> transaction_result()
   end
 
+  def keys(table_name) do
+    :mnesia.transaction(fn ->
+      :mnesia.all_keys(table_name)
+    end)
+    |> transaction_result()
+  end
+
   def tables(owner_uid) do
     prefix = "#{owner_uid}:"
 
@@ -380,9 +387,11 @@ defmodule Cortex.Store do
   # Exact match
   defp value_matches?(data_value, pattern_value) when data_value == pattern_value, do: true
   # Array containment: if data is a list and pattern is scalar, check membership
-  defp value_matches?(data_value, pattern_value) when is_list(data_value) and not is_list(pattern_value) do
+  defp value_matches?(data_value, pattern_value)
+       when is_list(data_value) and not is_list(pattern_value) do
     Enum.member?(data_value, pattern_value)
   end
+
   defp value_matches?(_, _), do: false
 
   defp stringify(value) when is_binary(value), do: value
