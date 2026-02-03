@@ -208,6 +208,14 @@ defmodule Cortex.Handler do
     end
   end
 
+  defp dispatch("keys", [table_name], uid) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name)
+
+    with :ok <- ACL.authorize(uid, table, :all) do
+      Store.keys(table)
+    end
+  end
+
   defp dispatch("acl_grant", [identity, table_name, perms], uid) when is_binary(table_name) do
     table = Store.resolve_table(uid, table_name)
 

@@ -94,6 +94,12 @@ enum Commands {
         table: String,
     },
 
+    /// List all keys in a table
+    Keys {
+        /// Table name
+        table: String,
+    },
+
     /// Access control commands
     Acl {
         #[command(subcommand)]
@@ -210,6 +216,11 @@ fn main() -> ExitCode {
         Some(Commands::All { table }) => call(
             &cli.socket,
             "all",
+            vec![Value::String(table.clone().into())],
+        ),
+        Some(Commands::Keys { table }) => call(
+            &cli.socket,
+            "keys",
             vec![Value::String(table.clone().into())],
         ),
         Some(Commands::Acl { command }) => match command {
@@ -392,6 +403,7 @@ COMMANDS:
   delete TABLE KEY              Delete record
   query TABLE PATTERN           Query by pattern (JSON)
   all TABLE                     List all records
+  keys TABLE                    List all keys in a table
 
   acl grant IDENTITY TABLE PERMS    Grant permissions
   acl revoke IDENTITY TABLE PERMS   Revoke permissions
@@ -559,6 +571,20 @@ EXAMPLES:
   cortex all users --pretty
   cortex all config"#
         ),
+        Some("keys") => println!(
+            r#"cortex keys - List all keys in a table
+
+USAGE:
+  cortex keys TABLE [--pretty]
+
+DESCRIPTION:
+  Returns all primary keys in a table as a JSON array. Useful for
+  debugging or iterating over records without fetching full data.
+
+EXAMPLES:
+  cortex keys users
+  cortex keys sessions --pretty"#
+        ),
         Some("acl") => println!(
             r#"cortex acl - Access control commands
 
@@ -668,7 +694,7 @@ FINDING YOUR UID:
             eprintln!();
             eprintln!("Available commands:");
             eprintln!("  ping, status, tables, create-table, drop-table,");
-            eprintln!("  get, put, delete, query, all, acl");
+            eprintln!("  get, put, delete, query, all, keys, acl");
             eprintln!();
             eprintln!("Available patterns:");
             eprintln!("  patterns, memories, statemachine, identities");
