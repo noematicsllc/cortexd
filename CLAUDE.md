@@ -7,9 +7,16 @@ This file provides guidance to Claude Code when working with code in this reposi
 At the start of each session, check cortex for context:
 
 ```bash
-cortex all guidelines          # Rules and preferences (filter by scope: global + cortexd)
-cortex all cortexd             # Project-specific context and status
-cortex all public_memories     # Shared preferences (sub-agents can see these)
+# Quick: just get current status (enough for routine continuation)
+cortex get cortexd status-current
+
+# Standard: add guidelines for fresh onboarding
+cortex query guidelines '{"scope":"global"}'
+cortex query guidelines '{"scope":"cortexd"}'
+
+# Deep: follow session-log references if needed
+cortex get cortexd {session-id}        # from status-current.active_work
+cortex query public_memories '{"type":"pattern"}'  # discover conventions
 ```
 
 Store learnings, decisions, and status updates back to cortex as you work. This avoids repeating context across sessions and keeps the filesystem clean.

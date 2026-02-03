@@ -208,6 +208,16 @@ defmodule Cortex.Handler do
     end
   end
 
+  # Debug: list all keys in a table
+  defp dispatch("keys", [table_name], uid) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name)
+
+    with :ok <- ACL.authorize(uid, table, :all) do
+      {:atomic, keys} = :mnesia.transaction(fn -> :mnesia.all_keys(table) end)
+      {:ok, keys}
+    end
+  end
+
   defp dispatch("acl_grant", [identity, table_name, perms], uid) when is_binary(table_name) do
     table = Store.resolve_table(uid, table_name)
 
