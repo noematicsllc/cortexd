@@ -4,7 +4,7 @@ set -e
 # Cortex binary installation script
 # Downloads pre-built binaries from GitHub releases
 
-VERSION="${CORTEX_VERSION:-0.1.0-alpha}"
+VERSION="${CORTEX_VERSION:-0.1.0-beta}"
 REPO="noematicsllc/cortexd"
 INSTALL_DIR="/var/lib/cortex"
 BIN_DIR="/usr/local/bin"

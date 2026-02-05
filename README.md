@@ -2,7 +2,7 @@
 
 A local storage daemon providing an embedded Mnesia database accessible via Unix socket. UID-based authentication with per-table access control.
 
-**Current version: 0.1.0-alpha**
+**Current version: 0.1.0-beta**
 
 ## Features
 
@@ -27,7 +27,7 @@ This auto-detects your platform and installs both the daemon and CLI.
 To install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/noematicsllc/cortexd/main/install-binary.sh | sudo CORTEX_VERSION=0.1.0-alpha bash
+curl -fsSL https://raw.githubusercontent.com/noematicsllc/cortexd/main/install-binary.sh | sudo CORTEX_VERSION=0.1.0-beta bash
 ```
 
 Or download manually from [GitHub Releases](https://github.com/noematicsllc/cortexd/releases).
