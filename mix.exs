@@ -43,12 +43,7 @@ defmodule Cortex.MixProject do
     [
       cortex: [
         # Bundle Erlang runtime for standalone distribution
-        include_erts: true,
-        applications: [
-          # Include but don't start - we start it manually
-          mnesia: :load,
-          cortex: :permanent
-        ]
+        include_erts: true
       ]
     ]
   end

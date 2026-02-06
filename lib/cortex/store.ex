@@ -39,7 +39,10 @@ defmodule Cortex.Store do
       {:error, reason} -> Logger.warning("Schema creation: #{inspect(reason)}")
     end
 
-    :ok = :mnesia.start()
+    case :mnesia.start() do
+      :ok -> :ok
+      {:error, {:already_started, :mnesia}} -> :ok
+    end
 
     # System tables
     create_system_table(@acl_table, [:identity_table, :permissions])
