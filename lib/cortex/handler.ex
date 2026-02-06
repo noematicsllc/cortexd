@@ -332,18 +332,20 @@ defmodule Cortex.Handler do
     else
       node_name = Keyword.fetch!(mesh_config, :node_name)
 
-      case Store.register_identity(name, node_name, uid) do
-        {:ok, :ok} ->
-          case Cortex.Mesh.Token.generate(name, node_name, uid) do
-            {:ok, token} -> {:ok, %{name: name, token: token}}
-            error -> error
-          end
+      with :ok <- authorize_identity_register(name, uid) do
+        case Store.register_identity(name, node_name, uid) do
+          {:ok, :ok} ->
+            case Cortex.Mesh.Token.generate(name, node_name, uid) do
+              {:ok, token} -> {:ok, %{name: name, token: token}}
+              error -> error
+            end
 
-        {:error, :already_exists} ->
-          {:error, "identity '#{name}' already exists"}
+          {:error, :already_exists} ->
+            {:error, "identity '#{name}' already exists"}
 
-        error ->
-          error
+          error ->
+            error
+        end
       end
     end
   end
@@ -481,6 +483,22 @@ defmodule Cortex.Handler do
   defp parse_scope("local"), do: :local
   defp parse_scope("all"), do: :all
   defp parse_scope(nodes_str), do: String.split(nodes_str, ",") |> Enum.map(&String.trim/1)
+
+  # Root can register any identity name. Non-root users can only register
+  # names matching their UID pattern to prevent identity squatting.
+  defp authorize_identity_register(_name, 0), do: :ok
+
+  defp authorize_identity_register(name, uid) do
+    if valid_identity_name_for_uid?(name, uid) do
+      :ok
+    else
+      {:error, "unauthorized: identity name must match your UID (e.g. uid-#{uid}-*)"}
+    end
+  end
+
+  defp valid_identity_name_for_uid?(name, uid) do
+    String.starts_with?(name, "uid-#{uid}-") or String.starts_with?(name, "#{uid}-")
+  end
 
   defp authorize_identity_revoke(_name, 0), do: :ok
 

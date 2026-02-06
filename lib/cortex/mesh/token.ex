@@ -21,28 +21,24 @@ defmodule Cortex.Mesh.Token do
       config ->
         key_path = Keyword.fetch!(config, :node_key)
 
-        case File.read(key_path) do
-          {:ok, pem} ->
-            private_key = decode_private_key(pem)
-            now = System.system_time(:second)
+        with {:ok, pem} <- File.read(key_path) |> wrap_file_error("node key"),
+             {:ok, private_key} <- decode_private_key(pem) do
+          now = System.system_time(:second)
 
-            payload = %{
-              "fed_id" => fed_id,
-              "origin_node" => node_name,
-              "origin_uid" => uid,
-              "issued_at" => now,
-              "expires_at" => now + @default_ttl_seconds
-            }
+          payload = %{
+            "fed_id" => fed_id,
+            "origin_node" => node_name,
+            "origin_uid" => uid,
+            "issued_at" => now,
+            "expires_at" => now + @default_ttl_seconds
+          }
 
-            payload_json = Jason.encode!(payload)
-            payload_b64 = Base.url_encode64(payload_json)
-            signature = :public_key.sign(payload_json, :sha256, private_key)
-            sig_b64 = Base.url_encode64(signature)
+          payload_json = Jason.encode!(payload)
+          payload_b64 = Base.url_encode64(payload_json)
+          signature = :public_key.sign(payload_json, :sha256, private_key)
+          sig_b64 = Base.url_encode64(signature)
 
-            {:ok, "#{payload_b64}.#{sig_b64}"}
-
-          {:error, reason} ->
-            {:error, "cannot read node key: #{inspect(reason)}"}
+          {:ok, "#{payload_b64}.#{sig_b64}"}
         end
     end
   end
@@ -132,31 +128,28 @@ defmodule Cortex.Mesh.Token do
   end
 
   defp verify_signature(payload_json, signature, cert_pem, ca_cert_path) do
-    [{:Certificate, cert_der, :not_encrypted}] = :public_key.pem_decode(cert_pem)
-    otp_cert = :public_key.pkix_decode_cert(cert_der, :otp)
+    with [{:Certificate, cert_der, :not_encrypted}] <- :public_key.pem_decode(cert_pem),
+         {:ok, ca_pem} <- File.read(ca_cert_path),
+         [{:Certificate, ca_der, :not_encrypted}] <- :public_key.pem_decode(ca_pem) do
+      otp_cert = :public_key.pkix_decode_cert(cert_der, :otp)
+      ca_otp = :public_key.pkix_decode_cert(ca_der, :otp)
 
-    # Validate the origin certificate was signed by our CA
-    case File.read(ca_cert_path) do
-      {:ok, ca_pem} ->
-        [{:Certificate, ca_der, :not_encrypted}] = :public_key.pem_decode(ca_pem)
-        ca_otp = :public_key.pkix_decode_cert(ca_der, :otp)
+      case :public_key.pkix_path_validation(ca_otp, [otp_cert], []) do
+        {:ok, _} ->
+          public_key = extract_public_key(otp_cert)
 
-        case :public_key.pkix_path_validation(ca_otp, [otp_cert], []) do
-          {:ok, _} ->
-            public_key = extract_public_key(otp_cert)
+          if :public_key.verify(payload_json, :sha256, signature, public_key) do
+            :ok
+          else
+            {:error, "invalid token signature"}
+          end
 
-            if :public_key.verify(payload_json, :sha256, signature, public_key) do
-              :ok
-            else
-              {:error, "invalid token signature"}
-            end
-
-          {:error, {:bad_cert, reason}} ->
-            {:error, "origin certificate not signed by mesh CA: #{inspect(reason)}"}
-        end
-
-      {:error, reason} ->
-        {:error, "cannot read CA certificate: #{inspect(reason)}"}
+        {:error, {:bad_cert, reason}} ->
+          {:error, "origin certificate not signed by mesh CA: #{inspect(reason)}"}
+      end
+    else
+      {:error, reason} -> {:error, "cannot read CA certificate: #{inspect(reason)}"}
+      _bad_pem -> {:error, "malformed certificate PEM"}
     end
   end
 
@@ -170,11 +163,28 @@ defmodule Cortex.Mesh.Token do
   end
 
   defp decode_private_key(pem) do
-    [{type, der, :not_encrypted}] = :public_key.pem_decode(pem)
+    case :public_key.pem_decode(pem) do
+      [{type, der, :not_encrypted}] ->
+        case type do
+          :RSAPrivateKey -> {:ok, :public_key.der_decode(:RSAPrivateKey, der)}
+          :PrivateKeyInfo -> {:ok, :public_key.der_decode(:PrivateKeyInfo, der)}
+          :ECPrivateKey -> {:ok, :public_key.der_decode(:ECPrivateKey, der)}
+          other -> {:error, "unsupported key type: #{inspect(other)}"}
+        end
 
-    case type do
-      :RSAPrivateKey -> :public_key.der_decode(:RSAPrivateKey, der)
-      :PrivateKeyInfo -> :public_key.der_decode(:PrivateKeyInfo, der)
+      [{_type, _der, _cipher}] ->
+        {:error, "encrypted private keys are not supported"}
+
+      [] ->
+        {:error, "no PEM entries found in key file"}
+
+      _other ->
+        {:error, "malformed PEM key file"}
     end
   end
+
+  defp wrap_file_error({:ok, _} = ok, _label), do: ok
+
+  defp wrap_file_error({:error, reason}, label),
+    do: {:error, "cannot read #{label}: #{inspect(reason)}"}
 end

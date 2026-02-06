@@ -440,6 +440,8 @@ defmodule Cortex.Store do
   end
 
   # Federated identity operations
+  # Authorization is enforced at the handler layer (handler.ex) — these
+  # functions are trusted internal APIs called only after authorization checks.
 
   def register_identity(fed_id, node_name, uid) do
     :mnesia.transaction(fn ->

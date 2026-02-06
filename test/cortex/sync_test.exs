@@ -107,7 +107,7 @@ defmodule Cortex.SyncTest do
       {:ok, :ok} = Store.set_node_scope(table, :all)
 
       # repair removes replicas then re-applies scope — no-op on single node
-      Sync.repair(table)
+      assert Sync.repair(table) == :ok
     end
   end
 

@@ -129,8 +129,11 @@ defmodule Cortex.Sync do
   Force re-sync a table by removing and re-adding copies.
   """
   def repair(table) do
-    for node <- mesh_nodes() do
-      remove_replica(table, node)
+    remove_results = for node <- mesh_nodes(), do: remove_replica(table, node)
+    remove_errors = Enum.filter(remove_results, &match?({:error, _}, &1))
+
+    if remove_errors != [] do
+      Logger.warning("repair #{table}: errors removing replicas: #{inspect(remove_errors)}")
     end
 
     apply_node_scope(table)
