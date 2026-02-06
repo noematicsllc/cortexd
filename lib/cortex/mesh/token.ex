@@ -7,6 +7,8 @@ defmodule Cortex.Mesh.Token do
   base64-encoded payload with an appended signature — no JWT dependency.
   """
 
+  require Logger
+
   @default_ttl_seconds 86400
 
   @doc """
@@ -104,26 +106,65 @@ defmodule Cortex.Mesh.Token do
   defp check_expiry(_), do: {:error, "missing expiry"}
 
   defp fetch_origin_cert(origin_node, config) do
-    # Look up the origin node's certificate from mesh config
-    # In a full implementation, this would contact the origin node over mTLS
-    # For now, check the local cert store
     nodes = Keyword.get(config, :nodes, [])
 
     case Enum.find(nodes, fn {name, _, _} -> name == origin_node end) do
       nil ->
         {:error, "origin node #{origin_node} not found in mesh config"}
 
-      _node_info ->
-        # The origin node's cert would be obtained during mTLS connection
-        # For now, look for it in the CA directory
-        ca_cert = Keyword.fetch!(config, :ca_cert)
-        ca_dir = Path.dirname(ca_cert)
-        cert_path = Path.join([ca_dir, "nodes", "#{origin_node}.crt"])
+      {_name, host, port} ->
+        # Primary: fetch cert via mTLS connection to origin node
+        case fetch_cert_via_mtls(host, port, config) do
+          {:ok, pem} ->
+            {:ok, pem}
 
-        case File.read(cert_path) do
-          {:ok, pem} -> {:ok, pem}
-          {:error, _} -> {:error, "cannot find certificate for #{origin_node}"}
+          {:error, reason} ->
+            Logger.debug(
+              "mTLS cert fetch from #{origin_node} failed (#{inspect(reason)}), trying local store"
+            )
+
+            # Fallback: read from local cert store
+            fetch_cert_from_local_store(origin_node, config)
         end
+    end
+  end
+
+  defp fetch_cert_via_mtls(host, port, config) do
+    ca_cert = Keyword.fetch!(config, :ca_cert)
+    node_cert = Keyword.fetch!(config, :node_cert)
+    node_key = Keyword.fetch!(config, :node_key)
+
+    ssl_opts = [
+      certfile: node_cert,
+      keyfile: node_key,
+      cacertfile: ca_cert,
+      verify: :verify_peer,
+      versions: [:"tlsv1.3", :"tlsv1.2"],
+      active: false
+    ]
+
+    host_charlist = String.to_charlist(host)
+
+    with {:ok, ssl_socket} <- :ssl.connect(host_charlist, port, ssl_opts, 5_000),
+         {:ok, cert_der} <- :ssl.peercert(ssl_socket) do
+      :ssl.close(ssl_socket)
+      # Convert DER to PEM
+      pem_entry = {:Certificate, cert_der, :not_encrypted}
+      {:ok, :public_key.pem_encode([pem_entry])}
+    else
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp fetch_cert_from_local_store(origin_node, config) do
+    ca_cert = Keyword.fetch!(config, :ca_cert)
+    ca_dir = Path.dirname(ca_cert)
+    cert_path = Path.join([ca_dir, "nodes", "#{origin_node}.crt"])
+
+    case File.read(cert_path) do
+      {:ok, pem} -> {:ok, pem}
+      {:error, _} -> {:error, "cannot find certificate for #{origin_node}"}
     end
   end
 

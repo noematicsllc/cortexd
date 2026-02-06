@@ -89,7 +89,7 @@ defmodule Cortex.Handler do
     else
       buffer = state.buffer <> data
 
-      case process_buffer(buffer, state.uid) do
+      case process_buffer(buffer, state) do
         {:ok, response, rest} ->
           send_data(state, response)
           set_active_once(state)
@@ -115,10 +115,10 @@ defmodule Cortex.Handler do
   defp set_active_once(%{transport: :tls, socket: socket}),
     do: :ssl.setopts(socket, [{:active, :once}])
 
-  defp process_buffer(buffer, uid) do
+  defp process_buffer(buffer, state) do
     case Msgpax.unpack_slice(buffer) do
       {:ok, message, rest} ->
-        response = handle_message(message, uid)
+        response = handle_message(message, state)
         {:ok, response, rest}
 
       {:error, %Msgpax.UnpackError{reason: :incomplete}} ->
@@ -129,8 +129,19 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp handle_message([0, msgid, method, params], uid) do
-    result = dispatch(method, params, uid)
+  # 5-element RPC: [0, msgid, method, params, metadata]
+  defp handle_message([0, msgid, _method, _params, metadata], %{transport: :unix})
+       when is_map(metadata) do
+    # Metadata not allowed on local Unix connections (anti-spoofing)
+    Protocol.encode_error(msgid, "metadata not allowed on local connections")
+  end
+
+  defp handle_message([0, msgid, method, params, metadata], %{transport: :tls} = state)
+       when is_map(metadata) do
+    remote_uid = extract_remote_uid(metadata)
+    resolved_uid = resolve_remote_identity(state.node_id, remote_uid)
+    requesting_node = state.node_id
+    result = dispatch(method, params, resolved_uid, requesting_node)
 
     case result do
       {:ok, value} -> Protocol.encode_response(msgid, value)
@@ -139,17 +150,40 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp handle_message(_invalid, _uid) do
+  # 4-element RPC: [0, msgid, method, params]
+  defp handle_message([0, msgid, method, params], state) do
+    uid = state.uid
+    requesting_node = state.node_id
+    result = dispatch(method, params, uid, requesting_node)
+
+    case result do
+      {:ok, value} -> Protocol.encode_response(msgid, value)
+      {:error, reason} -> Protocol.encode_error(msgid, reason)
+      :ok -> Protocol.encode_response(msgid, "ok")
+    end
+  end
+
+  defp handle_message(_invalid, _state) do
     Protocol.encode_error(0, :invalid_request)
   end
 
+  # Extract remote UID from RPC metadata, validating it's a non-negative integer
+  defp extract_remote_uid(%{"uid" => uid}) when is_integer(uid) and uid >= 0, do: uid
+  defp extract_remote_uid(_), do: nil
+
+  # Resolve a (node_id, remote_uid) pair. The remote UID is passed through
+  # directly — federated identity resolution happens at the Store layer
+  # (resolve_table) using the requesting_node. This keeps dispatch simple.
+  defp resolve_remote_identity(_node_id, nil), do: nil
+  defp resolve_remote_identity(_node_id, remote_uid), do: remote_uid
+
   # Dispatch methods
 
-  defp dispatch("ping", _params, _uid) do
+  defp dispatch("ping", _params, _uid, _requesting_node) do
     {:ok, "pong"}
   end
 
-  defp dispatch("status", _params, _uid) do
+  defp dispatch("status", _params, _uid, _requesting_node) do
     {:ok,
      %{
        version: Cortex.Version.version(),
@@ -159,110 +193,113 @@ defmodule Cortex.Handler do
      }}
   end
 
-  defp dispatch("tables", _params, uid) do
+  defp dispatch("tables", _params, uid, _requesting_node) do
     tables = Store.tables(uid)
     {:ok, tables}
   end
 
-  defp dispatch("create_table", [name, attributes], uid)
+  defp dispatch("create_table", [name, attributes], uid, requesting_node)
        when is_binary(name) and is_list(attributes) do
-    do_create_table(name, attributes, nil, uid)
+    do_create_table(name, attributes, nil, uid, requesting_node)
   end
 
-  defp dispatch("create_table", [name, attributes, scope], uid)
+  defp dispatch("create_table", [name, attributes, scope], uid, requesting_node)
        when is_binary(name) and is_list(attributes) and is_binary(scope) do
-    do_create_table(name, attributes, scope, uid)
+    do_create_table(name, attributes, scope, uid, requesting_node)
   end
 
-  defp dispatch("create_table", _params, _uid) do
+  defp dispatch("create_table", _params, _uid, _requesting_node) do
     {:error, "invalid params: expected [name, [attributes]] or [name, [attributes], scope]"}
   end
 
-  defp dispatch("drop_table", [name], uid) when is_binary(name) do
-    table = Store.resolve_table(uid, name)
+  defp dispatch("drop_table", [name], uid, requesting_node) when is_binary(name) do
+    table = Store.resolve_table(uid, name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :drop_table),
+    with :ok <- ACL.authorize(uid, table, :drop_table, requesting_node),
          :ok <- Store.drop_table(uid, name) do
       {:ok, "dropped"}
     end
   end
 
-  defp dispatch("put", [table_name, record], uid) when is_binary(table_name) and is_map(record) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("put", [table_name, record], uid, requesting_node)
+       when is_binary(table_name) and is_map(record) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :put),
+    with :ok <- ACL.authorize(uid, table, :put, requesting_node),
          {:ok, :ok} <- Store.put(table, record) do
       {:ok, "ok"}
     end
   end
 
-  defp dispatch("put", _params, _uid) do
+  defp dispatch("put", _params, _uid, _requesting_node) do
     {:error, "invalid params: expected [table, record]"}
   end
 
-  defp dispatch("get", [table_name, key], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("get", [table_name, key], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :get) do
+    with :ok <- ACL.authorize(uid, table, :get, requesting_node) do
       Store.get(table, key)
     end
   end
 
-  defp dispatch("delete", [table_name, key], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("delete", [table_name, key], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :delete),
+    with :ok <- ACL.authorize(uid, table, :delete, requesting_node),
          {:ok, :ok} <- Store.delete(table, key) do
       {:ok, "ok"}
     end
   end
 
-  defp dispatch("match", [table_name, pattern], uid)
+  defp dispatch("match", [table_name, pattern], uid, requesting_node)
        when is_binary(table_name) and is_map(pattern) do
-    table = Store.resolve_table(uid, table_name)
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :match) do
+    with :ok <- ACL.authorize(uid, table, :match, requesting_node) do
       Store.match(table, pattern)
     end
   end
 
-  defp dispatch("all", [table_name], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("all", [table_name], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :all) do
+    with :ok <- ACL.authorize(uid, table, :all, requesting_node) do
       Store.all(table)
     end
   end
 
-  defp dispatch("keys", [table_name], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("keys", [table_name], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :all) do
+    with :ok <- ACL.authorize(uid, table, :all, requesting_node) do
       Store.keys(table)
     end
   end
 
-  defp dispatch("acl_grant", [identity, table_name, perms], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("acl_grant", [identity, table_name, perms], uid, requesting_node)
+       when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :acl_grant),
+    with :ok <- ACL.authorize(uid, table, :acl_grant, requesting_node),
          {:ok, perm_list} <- ACL.parse_permissions(perms),
          {:ok, :ok} <- Store.acl_grant(identity, table, perm_list) do
       {:ok, "granted"}
     end
   end
 
-  defp dispatch("acl_revoke", [identity, table_name, perms], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("acl_revoke", [identity, table_name, perms], uid, requesting_node)
+       when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :acl_revoke),
+    with :ok <- ACL.authorize(uid, table, :acl_revoke, requesting_node),
          {:ok, perm_list} <- ACL.parse_permissions(perms),
          {:ok, :ok} <- Store.acl_revoke(identity, table, perm_list) do
       {:ok, "revoked"}
     end
   end
 
-  defp dispatch("acl_list", _params, uid) do
+  defp dispatch("acl_list", _params, uid, _requesting_node) do
     case Store.acl_list(uid) do
       {:ok, acls} ->
         formatted =
@@ -279,8 +316,8 @@ defmodule Cortex.Handler do
 
   # Scope methods
 
-  defp dispatch("get_scope", [table_name], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("get_scope", [table_name], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
     case Store.get_table_meta(table) do
       {:ok, meta} -> {:ok, %{table: table_name, node_scope: meta.node_scope}}
@@ -288,10 +325,11 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("set_scope", [table_name, scope_str], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("set_scope", [table_name, scope_str], uid, requesting_node)
+       when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :drop_table) do
+    with :ok <- ACL.authorize(uid, table, :drop_table, requesting_node) do
       node_scope = parse_scope(scope_str)
 
       case Store.set_node_scope(table, node_scope) do
@@ -301,10 +339,10 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("table_info", [table_name], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("table_info", [table_name], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :get) do
+    with :ok <- ACL.authorize(uid, table, :get, requesting_node) do
       case Store.get_table_meta(table) do
         {:ok, meta} ->
           {:ok,
@@ -324,7 +362,7 @@ defmodule Cortex.Handler do
 
   # Identity methods
 
-  defp dispatch("identity_register", [name], uid) when is_binary(name) do
+  defp dispatch("identity_register", [name], uid, _requesting_node) when is_binary(name) do
     mesh_config = Cortex.mesh_config()
 
     if mesh_config == nil do
@@ -350,7 +388,7 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("identity_claim", [token], uid) when is_binary(token) do
+  defp dispatch("identity_claim", [token], uid, _requesting_node) when is_binary(token) do
     mesh_config = Cortex.mesh_config()
 
     if mesh_config == nil do
@@ -372,11 +410,11 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("identity_list", _params, _uid) do
+  defp dispatch("identity_list", _params, _uid, _requesting_node) do
     Store.list_identities()
   end
 
-  defp dispatch("identity_revoke", [name], uid) when is_binary(name) do
+  defp dispatch("identity_revoke", [name], uid, _requesting_node) when is_binary(name) do
     with :ok <- authorize_identity_revoke(name, uid) do
       case Store.revoke_identity(name) do
         {:ok, :ok} -> {:ok, "revoked"}
@@ -385,7 +423,7 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("identity_revoke", [name, node_name], uid)
+  defp dispatch("identity_revoke", [name, node_name], uid, _requesting_node)
        when is_binary(name) and is_binary(node_name) do
     with :ok <- authorize_identity_revoke(name, uid) do
       case Store.revoke_identity(name, node_name) do
@@ -397,7 +435,7 @@ defmodule Cortex.Handler do
 
   # Mesh info methods
 
-  defp dispatch("mesh_list_nodes", _params, _uid) do
+  defp dispatch("mesh_list_nodes", _params, _uid, _requesting_node) do
     case Cortex.mesh_config() do
       nil ->
         {:error, "mesh networking not configured"}
@@ -414,7 +452,7 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp dispatch("mesh_status", _params, _uid) do
+  defp dispatch("mesh_status", _params, _uid, _requesting_node) do
     case Cortex.mesh_config() do
       nil ->
         {:error, "mesh networking not configured"}
@@ -439,35 +477,38 @@ defmodule Cortex.Handler do
 
   # Sync methods
 
-  defp dispatch("sync_status", _params, _uid) do
+  defp dispatch("sync_status", _params, _uid, _requesting_node) do
     {:ok, Cortex.Sync.status()}
   end
 
-  defp dispatch("sync_status_table", [table_name], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("sync_status_table", [table_name], uid, requesting_node)
+       when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
     {:ok, Cortex.Sync.status(table)}
   end
 
-  defp dispatch("sync_repair", [table_name], uid) when is_binary(table_name) do
-    table = Store.resolve_table(uid, table_name)
+  defp dispatch("sync_repair", [table_name], uid, requesting_node) when is_binary(table_name) do
+    table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
-    with :ok <- ACL.authorize(uid, table, :drop_table) do
+    with :ok <- ACL.authorize(uid, table, :drop_table, requesting_node) do
       Cortex.Sync.repair(table)
       {:ok, "repair initiated"}
     end
   end
 
-  defp dispatch(method, _params, _uid) do
+  defp dispatch(method, _params, _uid, _requesting_node) do
     {:error, "unknown method: #{method}"}
   end
 
-  defp do_create_table(name, attributes, scope_str, uid) do
-    if not valid_name?(name) do
+  defp do_create_table(name, attributes, scope_str, uid, requesting_node) do
+    # Federated (@-prefixed) names have their own validation
+    if not String.starts_with?(name, "@") and not valid_name?(name) do
       {:error, "invalid table name: must be alphanumeric with underscores"}
     else
       case validate_and_convert_attrs(attributes) do
         {:ok, attrs} ->
           opts = if scope_str, do: [node_scope: parse_scope(scope_str)], else: []
+          opts = if requesting_node, do: [{:node_name, requesting_node} | opts], else: opts
 
           case Store.create_table(uid, name, attrs, opts) do
             {:ok, _table_name} -> {:ok, "created"}

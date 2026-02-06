@@ -116,4 +116,41 @@ defmodule Cortex.TestHelpers.Mesh do
         {:error, reason}
     end
   end
+
+  @doc """
+  Send a 5-element MsgPack-RPC request with metadata and receive the response.
+  The metadata map typically contains %{"uid" => remote_uid}.
+  """
+  def rpc_call_with_metadata(ssl_socket, method, params, metadata) when is_map(metadata) do
+    msgid = :erlang.unique_integer([:positive])
+    request = Msgpax.pack!([0, msgid, method, params, metadata])
+    :ok = :ssl.send(ssl_socket, request)
+
+    case :ssl.recv(ssl_socket, 0, 5_000) do
+      {:ok, data} ->
+        {:ok, [1, ^msgid, error, result]} = Msgpax.unpack(data)
+        if error, do: {:error, error}, else: {:ok, result}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Send a 5-element MsgPack-RPC request over a Unix gen_tcp socket (for testing rejection).
+  """
+  def unix_rpc_call_with_metadata(socket, method, params, metadata) when is_map(metadata) do
+    msgid = :erlang.unique_integer([:positive])
+    request = Msgpax.pack!([0, msgid, method, params, metadata])
+    :ok = :gen_tcp.send(socket, request)
+
+    case :gen_tcp.recv(socket, 0, 5_000) do
+      {:ok, data} ->
+        {:ok, [1, ^msgid, error, result]} = Msgpax.unpack(data)
+        if error, do: {:error, error}, else: {:ok, result}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 end
