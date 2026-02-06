@@ -87,7 +87,8 @@ defmodule Cortex.Identity do
   def resolve_federated(node_name, uid) do
     case Cortex.Store.lookup_federated_by_local(node_name, uid) do
       {:ok, fed_id} -> {:ok, fed_id}
-      _ -> :not_found
+      {:error, :not_found} -> :not_found
+      {:error, reason} -> {:error, reason}
     end
   end
 end

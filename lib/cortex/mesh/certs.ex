@@ -42,7 +42,17 @@ defmodule Cortex.Mesh.Certs do
   Generate a node certificate signed by the mesh CA.
   Returns {:ok, cert_path} or {:error, reason}.
   """
+  @valid_node_name ~r/^[a-zA-Z0-9_-]+$/
+
   def add_node(ca_dir, node_name, host, opts \\ []) do
+    unless Regex.match?(@valid_node_name, node_name) do
+      {:error, "invalid node name: must be alphanumeric with hyphens/underscores"}
+    else
+      do_add_node(ca_dir, node_name, host, opts)
+    end
+  end
+
+  defp do_add_node(ca_dir, node_name, host, opts) do
     ca_key_path = Path.join(ca_dir, "ca.key")
     ca_cert_path = Path.join(ca_dir, "ca.crt")
     nodes_dir = Keyword.get(opts, :output_dir, Path.join(ca_dir, "nodes"))

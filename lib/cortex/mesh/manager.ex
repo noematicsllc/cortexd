@@ -53,12 +53,14 @@ defmodule Cortex.Mesh.Manager do
     {:noreply, state}
   end
 
+  @impl true
   def handle_info({:nodeup, node}, state) do
     Logger.info("Mesh node joined: #{node}")
     Cortex.Sync.on_node_join(node)
     {:noreply, state}
   end
 
+  @impl true
   def handle_info({:nodedown, node}, state) do
     Logger.info("Mesh node left: #{node}")
     Cortex.Sync.on_node_leave(node)

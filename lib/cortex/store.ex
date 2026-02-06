@@ -77,29 +77,44 @@ defmodule Cortex.Store do
 
   def create_table(owner_uid, name, attributes, opts \\ [])
       when is_list(attributes) and length(attributes) > 0 do
-    {table_name, default_scope} =
+    result =
       if String.starts_with?(name, "@") do
         # Federated table — resolve the @ namespace
-        resolved = resolve_table(owner_uid, name, Keyword.take(opts, [:node_name]))
-        # If it couldn't resolve (no federated identity), the table name from resolve_table
-        # will be an existing atom or :table_does_not_exist. For creation, build it directly.
         short = name |> String.trim_leading("@") |> String.split(":") |> List.last()
         fed_part = name |> String.trim_leading("@")
 
-        table_atom =
-          if String.contains?(fed_part, ":") do
-            String.to_atom("@#{fed_part}")
-          else
-            case resolve_caller_fed_id(owner_uid, Keyword.get(opts, :node_name)) do
-              {:ok, fed_id} -> String.to_atom("@#{fed_id}:#{short}")
-              :error -> String.to_atom("@#{owner_uid}:#{short}")
-            end
-          end
+        if String.contains?(fed_part, ":") do
+          # Fully-qualified: verify the caller owns this fed_id
+          [claimed_fed_id | _] = String.split(fed_part, ":")
 
-        {table_atom, :all}
+          case resolve_caller_fed_id(owner_uid, Keyword.get(opts, :node_name)) do
+            {:ok, ^claimed_fed_id} ->
+              {:ok, {String.to_atom("@#{fed_part}"), :all}}
+
+            {:ok, _other} ->
+              {:error, :unauthorized}
+
+            :error ->
+              {:error, :federated_identity_required}
+          end
+        else
+          case resolve_caller_fed_id(owner_uid, Keyword.get(opts, :node_name)) do
+            {:ok, fed_id} ->
+              {:ok, {String.to_atom("@#{fed_id}:#{short}"), :all}}
+
+            :error ->
+              {:error, :federated_identity_required}
+          end
+        end
       else
-        {namespaced_table(owner_uid, name), :local}
+        {:ok, {namespaced_table(owner_uid, name), :local}}
       end
+
+    case result do
+      {:error, reason} ->
+        {:error, reason}
+
+      {:ok, {table_name, default_scope}} ->
 
     key_field = hd(attributes)
     node_scope = Keyword.get(opts, :node_scope, default_scope)
@@ -124,6 +139,7 @@ defmodule Cortex.Store do
 
       {:aborted, reason} ->
         {:error, reason}
+    end
     end
   end
 
@@ -407,8 +423,12 @@ defmodule Cortex.Store do
     # Trigger replication changes
     case result do
       {:ok, :ok} ->
-        Cortex.Sync.apply_node_scope(table_name)
-        result
+        case Cortex.Sync.apply_node_scope(table_name) do
+          :ok -> result
+          {:error, reason} ->
+            Logger.warning("Scope updated but replication failed: #{inspect(reason)}")
+            {:error, {:replication_failed, reason}}
+        end
 
       _ ->
         result

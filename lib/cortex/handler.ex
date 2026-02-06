@@ -175,25 +175,6 @@ defmodule Cortex.Handler do
     {:error, "invalid params: expected [name, [attributes]] or [name, [attributes], scope]"}
   end
 
-  defp do_create_table(name, attributes, scope_str, uid) do
-    if not valid_name?(name) do
-      {:error, "invalid table name: must be alphanumeric with underscores"}
-    else
-      case validate_and_convert_attrs(attributes) do
-        {:ok, attrs} ->
-          opts = if scope_str, do: [node_scope: parse_scope(scope_str)], else: []
-
-          case Store.create_table(uid, name, attrs, opts) do
-            {:ok, _table_name} -> {:ok, "created"}
-            error -> error
-          end
-
-        {:error, _} = error ->
-          error
-      end
-    end
-  end
-
   defp dispatch("drop_table", [name], uid) when is_binary(name) do
     table = Store.resolve_table(uid, name)
 
@@ -337,10 +318,6 @@ defmodule Cortex.Handler do
     end
   end
 
-  defp parse_scope("local"), do: :local
-  defp parse_scope("all"), do: :all
-  defp parse_scope(nodes_str), do: String.split(nodes_str, ",") |> Enum.map(&String.trim/1)
-
   # Identity methods
 
   defp dispatch("identity_register", [name], uid) when is_binary(name) do
@@ -375,7 +352,7 @@ defmodule Cortex.Handler do
     else
       node_name = Keyword.fetch!(mesh_config, :node_name)
 
-      case Cortex.Mesh.Token.decode_payload(token) do
+      case Cortex.Mesh.Token.verify(token) do
         {:ok, %{"fed_id" => fed_id}} ->
           case Store.claim_identity(fed_id, node_name, uid) do
             {:ok, :ok} -> {:ok, "claimed identity '#{fed_id}'"}
@@ -393,18 +370,22 @@ defmodule Cortex.Handler do
     Store.list_identities()
   end
 
-  defp dispatch("identity_revoke", [name], _uid) when is_binary(name) do
-    case Store.revoke_identity(name) do
-      {:ok, :ok} -> {:ok, "revoked"}
-      error -> error
+  defp dispatch("identity_revoke", [name], uid) when is_binary(name) do
+    with :ok <- authorize_identity_revoke(name, uid) do
+      case Store.revoke_identity(name) do
+        {:ok, :ok} -> {:ok, "revoked"}
+        error -> error
+      end
     end
   end
 
-  defp dispatch("identity_revoke", [name, node_name], _uid)
+  defp dispatch("identity_revoke", [name, node_name], uid)
        when is_binary(name) and is_binary(node_name) do
-    case Store.revoke_identity(name, node_name) do
-      {:ok, :ok} -> {:ok, "revoked"}
-      error -> error
+    with :ok <- authorize_identity_revoke(name, uid) do
+      case Store.revoke_identity(name, node_name) do
+        {:ok, :ok} -> {:ok, "revoked"}
+        error -> error
+      end
     end
   end
 
@@ -464,6 +445,51 @@ defmodule Cortex.Handler do
 
   defp dispatch(method, _params, _uid) do
     {:error, "unknown method: #{method}"}
+  end
+
+  defp do_create_table(name, attributes, scope_str, uid) do
+    if not valid_name?(name) do
+      {:error, "invalid table name: must be alphanumeric with underscores"}
+    else
+      case validate_and_convert_attrs(attributes) do
+        {:ok, attrs} ->
+          opts = if scope_str, do: [node_scope: parse_scope(scope_str)], else: []
+
+          case Store.create_table(uid, name, attrs, opts) do
+            {:ok, _table_name} -> {:ok, "created"}
+            error -> error
+          end
+
+        {:error, _} = error ->
+          error
+      end
+    end
+  end
+
+  defp parse_scope("local"), do: :local
+  defp parse_scope("all"), do: :all
+  defp parse_scope(nodes_str), do: String.split(nodes_str, ",") |> Enum.map(&String.trim/1)
+
+  defp authorize_identity_revoke(_name, 0), do: :ok
+
+  defp authorize_identity_revoke(name, uid) do
+    mesh_config = Cortex.mesh_config()
+    node_name = if mesh_config, do: Keyword.get(mesh_config, :node_name)
+
+    case Store.lookup_federated(name) do
+      {:ok, %{mappings: mappings}} ->
+        if node_name && Map.get(mappings, node_name) == uid do
+          :ok
+        else
+          {:error, "unauthorized: you do not own this identity"}
+        end
+
+      {:error, :not_found} ->
+        {:error, "identity '#{name}' not found"}
+
+      error ->
+        error
+    end
   end
 
   # Validate name format (alphanumeric + underscore, starts with letter/underscore)

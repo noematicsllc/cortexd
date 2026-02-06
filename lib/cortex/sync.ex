@@ -24,22 +24,24 @@ defmodule Cortex.Sync do
         remove_all_replicas(table)
 
       {:ok, %{node_scope: :all}} ->
-        for node <- mesh_nodes() do
-          setup_replication(table, node)
-        end
-        :ok
+        results = for node <- mesh_nodes(), do: setup_replication(table, node)
+        errors = Enum.filter(results, &match?({:error, _}, &1))
+        if errors == [], do: :ok, else: {:error, {:partial_failure, errors}}
 
       {:ok, %{node_scope: nodes}} when is_list(nodes) ->
         mesh = mesh_nodes()
 
-        for node <- mesh do
-          if node_name(node) in nodes do
-            setup_replication(table, node)
-          else
-            remove_replica(table, node)
+        results =
+          for node <- mesh do
+            if node_name(node) in nodes do
+              setup_replication(table, node)
+            else
+              remove_replica(table, node)
+            end
           end
-        end
-        :ok
+
+        errors = Enum.filter(results, &match?({:error, _}, &1))
+        if errors == [], do: :ok, else: {:error, {:partial_failure, errors}}
 
       {:error, reason} ->
         Logger.error("Cannot apply node scope for #{table}: #{inspect(reason)}")

@@ -73,14 +73,24 @@ defmodule Cortex.TLSServer do
   defp complete_handshake(transport_socket) do
     case :ssl.handshake(transport_socket, 5_000) do
       {:ok, ssl_socket} ->
-        {:ok, pid} =
-          DynamicSupervisor.start_child(
-            Cortex.HandlerSupervisor,
-            {Cortex.Handler, {ssl_socket, :tls}}
-          )
+        case DynamicSupervisor.start_child(
+               Cortex.HandlerSupervisor,
+               {Cortex.Handler, {ssl_socket, :tls}}
+             ) do
+          {:ok, pid} ->
+            case :ssl.controlling_process(ssl_socket, pid) do
+              :ok ->
+                send(pid, :start)
 
-        :ssl.controlling_process(ssl_socket, pid)
-        send(pid, :start)
+              {:error, reason} ->
+                Logger.error("TLS controlling_process failed: #{inspect(reason)}")
+                :ssl.close(ssl_socket)
+            end
+
+          {:error, reason} ->
+            Logger.error("Failed to start TLS handler: #{inspect(reason)}")
+            :ssl.close(ssl_socket)
+        end
 
       {:error, reason} ->
         Logger.warning("TLS handshake failed: #{inspect(reason)}")

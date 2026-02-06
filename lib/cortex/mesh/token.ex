@@ -131,15 +131,32 @@ defmodule Cortex.Mesh.Token do
     end
   end
 
-  defp verify_signature(payload_json, signature, cert_pem, _ca_cert_path) do
+  defp verify_signature(payload_json, signature, cert_pem, ca_cert_path) do
     [{:Certificate, cert_der, :not_encrypted}] = :public_key.pem_decode(cert_pem)
     otp_cert = :public_key.pkix_decode_cert(cert_der, :otp)
-    public_key = extract_public_key(otp_cert)
 
-    if :public_key.verify(payload_json, :sha256, signature, public_key) do
-      :ok
-    else
-      {:error, "invalid token signature"}
+    # Validate the origin certificate was signed by our CA
+    case File.read(ca_cert_path) do
+      {:ok, ca_pem} ->
+        [{:Certificate, ca_der, :not_encrypted}] = :public_key.pem_decode(ca_pem)
+        ca_otp = :public_key.pkix_decode_cert(ca_der, :otp)
+
+        case :public_key.pkix_path_validation(ca_otp, [otp_cert], []) do
+          {:ok, _} ->
+            public_key = extract_public_key(otp_cert)
+
+            if :public_key.verify(payload_json, :sha256, signature, public_key) do
+              :ok
+            else
+              {:error, "invalid token signature"}
+            end
+
+          {:error, {:bad_cert, reason}} ->
+            {:error, "origin certificate not signed by mesh CA: #{inspect(reason)}"}
+        end
+
+      {:error, reason} ->
+        {:error, "cannot read CA certificate: #{inspect(reason)}"}
     end
   end
 

@@ -43,6 +43,7 @@ defmodule Cortex.Mesh.DistConfigTest do
       [_before, client_section] = String.split(result, "{client,", parts: 2)
       assert client_section =~ "{verify, verify_peer}"
       assert client_section =~ "{secure_renegotiate, true}"
+      refute client_section =~ "fail_if_no_peer_cert"
     end
   end
 
