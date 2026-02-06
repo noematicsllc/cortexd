@@ -21,7 +21,7 @@ defmodule Cortex.ACL do
     {:error, :access_denied}
   end
 
-  def authorize(uid, table_name, operation) do
+  def authorize(uid, table_name, operation, requesting_node \\ nil) do
     # Root (UID 0) bypasses all ACL checks. This enables:
     # - Admin backup/recovery of all data
     # - Auditing agent activity across all tables
@@ -29,7 +29,26 @@ defmodule Cortex.ACL do
     if uid == 0 do
       :ok
     else
-      authorize_non_root(uid, table_name, operation)
+      with :ok <- check_node_scope(table_name, requesting_node) do
+        authorize_non_root(uid, table_name, operation)
+      end
+    end
+  end
+
+  @doc """
+  Check if the requesting node is permitted by the table's node scope.
+  Local requests (requesting_node == nil) always pass.
+  """
+  def check_node_scope(_table_name, nil), do: :ok
+
+  def check_node_scope(table_name, requesting_node) do
+    case Store.get_table_meta(table_name) do
+      {:ok, %{node_scope: :all}} -> :ok
+      {:ok, %{node_scope: :local}} -> {:error, :access_denied}
+      {:ok, %{node_scope: nodes}} when is_list(nodes) ->
+        if requesting_node in nodes, do: :ok, else: {:error, :access_denied}
+      {:error, :not_found} -> {:error, :access_denied}
+      error -> error
     end
   end
 

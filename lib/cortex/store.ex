@@ -10,6 +10,7 @@ defmodule Cortex.Store do
 
   @acl_table :cortex_acls
   @meta_table :cortex_meta
+  @identities_table :cortex_identities
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -42,7 +43,8 @@ defmodule Cortex.Store do
 
     # System tables
     create_system_table(@acl_table, [:identity_table, :permissions])
-    create_system_table(@meta_table, [:table_name, :owner, :key_field, :attributes])
+    create_system_table(@meta_table, [:table_name, :owner, :key_field, :attributes, :node_scope])
+    create_system_table(@identities_table, [:fed_id, :mappings, :metadata])
 
     Logger.info("Mnesia started, data dir: #{data_dir}")
   end
@@ -70,18 +72,42 @@ defmodule Cortex.Store do
 
   # Public API
 
-  def create_table(owner_uid, name, attributes)
+  def create_table(owner_uid, name, attributes, opts \\ [])
       when is_list(attributes) and length(attributes) > 0 do
-    table_name = namespaced_table(owner_uid, name)
+    {table_name, default_scope} =
+      if String.starts_with?(name, "@") do
+        # Federated table — resolve the @ namespace
+        resolved = resolve_table(owner_uid, name, Keyword.take(opts, [:node_name]))
+        # If it couldn't resolve (no federated identity), the table name from resolve_table
+        # will be an existing atom or :table_does_not_exist. For creation, build it directly.
+        short = name |> String.trim_leading("@") |> String.split(":") |> List.last()
+        fed_part = name |> String.trim_leading("@")
+
+        table_atom =
+          if String.contains?(fed_part, ":") do
+            String.to_atom("@#{fed_part}")
+          else
+            case resolve_caller_fed_id(owner_uid, Keyword.get(opts, :node_name)) do
+              {:ok, fed_id} -> String.to_atom("@#{fed_id}:#{short}")
+              :error -> String.to_atom("@#{owner_uid}:#{short}")
+            end
+          end
+
+        {table_atom, :all}
+      else
+        {namespaced_table(owner_uid, name), :local}
+      end
+
     key_field = hd(attributes)
+    node_scope = Keyword.get(opts, :node_scope, default_scope)
 
-    opts = [{:attributes, [:key, :data]}, {storage_type(), [node()]}]
+    mnesia_opts = [{:attributes, [:key, :data]}, {storage_type(), [node()]}]
 
-    case :mnesia.create_table(table_name, opts) do
+    case :mnesia.create_table(table_name, mnesia_opts) do
       {:atomic, :ok} ->
-        # Store metadata
+        # Store metadata (6-element record with node_scope)
         :mnesia.transaction(fn ->
-          :mnesia.write({@meta_table, table_name, owner_uid, key_field, attributes})
+          :mnesia.write({@meta_table, table_name, owner_uid, key_field, attributes, node_scope})
           # Owner gets full access
           :mnesia.write(
             {@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]}
@@ -189,17 +215,38 @@ defmodule Cortex.Store do
   end
 
   def tables(owner_uid) do
-    prefix = "#{owner_uid}:"
+    uid_prefix = "#{owner_uid}:"
 
-    :mnesia.system_info(:tables)
-    |> Enum.filter(fn table ->
-      name = Atom.to_string(table)
-      String.starts_with?(name, prefix)
-    end)
-    |> Enum.map(fn table ->
-      name = Atom.to_string(table)
-      String.replace_prefix(name, prefix, "")
-    end)
+    local_tables =
+      :mnesia.system_info(:tables)
+      |> Enum.filter(fn table ->
+        name = Atom.to_string(table)
+        String.starts_with?(name, uid_prefix)
+      end)
+      |> Enum.map(fn table ->
+        name = Atom.to_string(table)
+        String.replace_prefix(name, uid_prefix, "")
+      end)
+
+    # Also include federated tables owned by this user's federated identity
+    fed_tables =
+      case resolve_caller_fed_id(owner_uid, nil) do
+        {:ok, fed_id} ->
+          fed_prefix = "@#{fed_id}:"
+
+          :mnesia.system_info(:tables)
+          |> Enum.filter(fn table ->
+            Atom.to_string(table) |> String.starts_with?(fed_prefix)
+          end)
+          |> Enum.map(fn table ->
+            Atom.to_string(table)
+          end)
+
+        :error ->
+          []
+      end
+
+    local_tables ++ fed_tables
   end
 
   def tables_accessible_by(uid) do
@@ -335,16 +382,164 @@ defmodule Cortex.Store do
     |> transaction_result()
   end
 
+  # Node scope operations
+
+  def set_node_scope(table_name, node_scope) when is_atom(table_name) do
+    result =
+      :mnesia.transaction(fn ->
+        case :mnesia.read({@meta_table, table_name}) do
+          [{@meta_table, ^table_name, owner, key_field, attributes, _old_scope}] ->
+            :mnesia.write({@meta_table, table_name, owner, key_field, attributes, node_scope})
+
+          # Backward compat: 5-element record
+          [{@meta_table, ^table_name, owner, key_field, attributes}] ->
+            :mnesia.write({@meta_table, table_name, owner, key_field, attributes, node_scope})
+
+          [] ->
+            :mnesia.abort(:not_found)
+        end
+      end)
+      |> transaction_result()
+
+    # Trigger replication changes
+    case result do
+      {:ok, :ok} ->
+        Cortex.Sync.apply_node_scope(table_name)
+        result
+
+      _ ->
+        result
+    end
+  end
+
+  # Federated identity operations
+
+  def register_identity(fed_id, node_name, uid) do
+    :mnesia.transaction(fn ->
+      case :mnesia.read({@identities_table, fed_id}) do
+        [] ->
+          mappings = %{node_name => uid}
+          metadata = %{created_at: DateTime.utc_now() |> DateTime.to_iso8601(), created_by: node_name}
+          :mnesia.write({@identities_table, fed_id, mappings, metadata})
+
+        _ ->
+          :mnesia.abort(:already_exists)
+      end
+    end)
+    |> transaction_result()
+  end
+
+  def claim_identity(fed_id, node_name, uid) do
+    :mnesia.transaction(fn ->
+      case :mnesia.read({@identities_table, fed_id}) do
+        [{@identities_table, ^fed_id, mappings, metadata}] ->
+          updated_mappings = Map.put(mappings, node_name, uid)
+          :mnesia.write({@identities_table, fed_id, updated_mappings, metadata})
+
+        [] ->
+          :mnesia.abort(:not_found)
+      end
+    end)
+    |> transaction_result()
+  end
+
+  def lookup_federated(fed_id) do
+    case :mnesia.transaction(fn -> :mnesia.read({@identities_table, fed_id}) end) do
+      {:atomic, [{@identities_table, ^fed_id, mappings, metadata}]} ->
+        {:ok, %{fed_id: fed_id, mappings: mappings, metadata: metadata}}
+
+      {:atomic, []} ->
+        {:error, :not_found}
+
+      {:aborted, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def lookup_federated_by_local(node_name, uid) do
+    :mnesia.transaction(fn ->
+      :mnesia.foldl(
+        fn {_, fed_id, mappings, _}, acc ->
+          if Map.get(mappings, node_name) == uid do
+            [fed_id | acc]
+          else
+            acc
+          end
+        end,
+        [],
+        @identities_table
+      )
+    end)
+    |> case do
+      {:atomic, [fed_id | _]} -> {:ok, fed_id}
+      {:atomic, []} -> {:error, :not_found}
+      {:aborted, reason} -> {:error, reason}
+    end
+  end
+
+  def list_identities do
+    :mnesia.transaction(fn ->
+      :mnesia.foldl(
+        fn {_, fed_id, mappings, metadata}, acc ->
+          [%{fed_id: fed_id, mappings: mappings, metadata: metadata} | acc]
+        end,
+        [],
+        @identities_table
+      )
+    end)
+    |> transaction_result()
+  end
+
+  def revoke_identity(fed_id, node_name \\ nil) do
+    :mnesia.transaction(fn ->
+      case :mnesia.read({@identities_table, fed_id}) do
+        [{@identities_table, ^fed_id, mappings, metadata}] ->
+          if node_name do
+            updated = Map.delete(mappings, node_name)
+
+            if map_size(updated) == 0 do
+              :mnesia.delete({@identities_table, fed_id})
+            else
+              :mnesia.write({@identities_table, fed_id, updated, metadata})
+            end
+          else
+            :mnesia.delete({@identities_table, fed_id})
+          end
+
+        [] ->
+          :mnesia.abort(:not_found)
+      end
+    end)
+    |> transaction_result()
+  end
+
   # Helpers
 
-  def resolve_table(uid, name) do
+  def resolve_table(uid, name, opts \\ []) do
+    node_name = Keyword.get(opts, :node_name)
+
     table_str =
-      if String.contains?(name, ":") do
-        # Fully qualified name (e.g., "1000:users")
-        name
-      else
-        # Short name - use caller's namespace
-        "#{uid}:#{name}"
+      cond do
+        # Fully qualified federated name (e.g., "@alice:memories")
+        String.starts_with?(name, "@") and String.contains?(name, ":") ->
+          name
+
+        # Short federated name (e.g., "@memories") — resolve to caller's federated identity
+        String.starts_with?(name, "@") ->
+          short = String.trim_leading(name, "@")
+
+          case resolve_caller_fed_id(uid, node_name) do
+            {:ok, fed_id} -> "@#{fed_id}:#{short}"
+            :error -> name
+          end
+
+        # Fully qualified local name (e.g., "1000:users")
+        String.contains?(name, ":") ->
+          name
+
+        # Short local name — use caller's UID namespace
+        true ->
+          "#{uid}:#{name}"
       end
 
     # Use existing atom to prevent atom exhaustion from probing non-existent tables
@@ -355,10 +550,43 @@ defmodule Cortex.Store do
     end
   end
 
+  defp resolve_caller_fed_id(uid, node_name) do
+    if node_name do
+      case lookup_federated_by_local(node_name, uid) do
+        {:ok, fed_id} -> {:ok, fed_id}
+        _ -> :error
+      end
+    else
+      # Local connection — check if this UID has a federated identity on this node
+      this_node = node_name_from_config()
+
+      if this_node do
+        case lookup_federated_by_local(this_node, uid) do
+          {:ok, fed_id} -> {:ok, fed_id}
+          _ -> :error
+        end
+      else
+        :error
+      end
+    end
+  end
+
+  defp node_name_from_config do
+    case Cortex.mesh_config() do
+      nil -> nil
+      config -> Keyword.get(config, :node_name)
+    end
+  end
+
   def get_table_meta(table_name) when is_atom(table_name) do
     case :mnesia.transaction(fn -> :mnesia.read({@meta_table, table_name}) end) do
+      # 6-element record (with node_scope)
+      {:atomic, [{@meta_table, ^table_name, owner, key_field, attributes, node_scope}]} ->
+        {:ok, %{owner: owner, key_field: key_field, attributes: attributes, node_scope: node_scope}}
+
+      # 5-element record (pre-mesh, backward compatible — treat as :local)
       {:atomic, [{@meta_table, ^table_name, owner, key_field, attributes}]} ->
-        {:ok, %{owner: owner, key_field: key_field, attributes: attributes}}
+        {:ok, %{owner: owner, key_field: key_field, attributes: attributes, node_scope: :local}}
 
       {:atomic, []} ->
         {:error, :not_found}

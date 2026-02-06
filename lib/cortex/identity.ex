@@ -24,6 +24,44 @@ defmodule Cortex.Identity do
   end
 
   @doc """
+  Extract the Common Name (CN) from a TLS peer certificate.
+
+  Returns {:ok, cn_string} or {:error, reason}.
+  """
+  def get_node_cn(ssl_socket) do
+    with {:ok, cert_der} <- :ssl.peercert(ssl_socket) do
+      otp_cert = :public_key.pkix_decode_cert(cert_der, :otp)
+      # OTPTBSCertificate is elem 1, subject is elem 6
+      # (0=tag, 1=version, 2=serial, 3=sig, 4=issuer, 5=validity, 6=subject, 7=spki)
+      tbs = elem(otp_cert, 1)
+      subject = elem(tbs, 6)
+
+      case extract_cn(subject) do
+        {:ok, cn} -> {:ok, cn}
+        :not_found -> {:error, :no_cn_in_cert}
+      end
+    end
+  end
+
+  defp extract_cn({:rdnSequence, rdn_list}) do
+    Enum.find_value(rdn_list, :not_found, fn attrs ->
+      Enum.find_value(attrs, nil, fn
+        {:AttributeTypeAndValue, {2, 5, 4, 3}, value} ->
+          {:ok, to_string_value(value)}
+        _ ->
+          nil
+      end)
+    end)
+  end
+
+  defp to_string_value({:utf8String, v}) when is_binary(v), do: v
+  defp to_string_value({:utf8String, v}) when is_list(v), do: List.to_string(v)
+  defp to_string_value({:printableString, v}) when is_list(v), do: List.to_string(v)
+  defp to_string_value({:printableString, v}) when is_binary(v), do: v
+  defp to_string_value(v) when is_binary(v), do: v
+  defp to_string_value(v) when is_list(v), do: List.to_string(v)
+
+  @doc """
   Format a UID as an identity string.
   """
   def uid_to_identity(uid), do: "uid:#{uid}"
@@ -40,4 +78,16 @@ defmodule Cortex.Identity do
 
   def parse_identity("*"), do: {:ok, :world}
   def parse_identity(_), do: {:error, :invalid_identity}
+
+  @doc """
+  Resolve a (node_name, uid) pair to a federated identity, if one exists.
+
+  Returns {:ok, fed_id} or :not_found.
+  """
+  def resolve_federated(node_name, uid) do
+    case Cortex.Store.lookup_federated_by_local(node_name, uid) do
+      {:ok, fed_id} -> {:ok, fed_id}
+      _ -> :not_found
+    end
+  end
 end
