@@ -43,12 +43,20 @@ defmodule Cortex.ACL do
 
   def check_node_scope(table_name, requesting_node) do
     case Store.get_table_meta(table_name) do
-      {:ok, %{node_scope: :all}} -> :ok
-      {:ok, %{node_scope: :local}} -> {:error, :access_denied}
+      {:ok, %{node_scope: :all}} ->
+        :ok
+
+      {:ok, %{node_scope: :local}} ->
+        {:error, :access_denied}
+
       {:ok, %{node_scope: nodes}} when is_list(nodes) ->
         if requesting_node in nodes, do: :ok, else: {:error, :access_denied}
-      {:error, :not_found} -> {:error, :access_denied}
-      error -> error
+
+      {:error, :not_found} ->
+        {:error, :access_denied}
+
+      error ->
+        error
     end
   end
 

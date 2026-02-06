@@ -94,6 +94,7 @@ defmodule Cortex.Sync do
     for table <- @system_tables, node <- mesh_nodes() do
       setup_replication(table, node)
     end
+
     :ok
   end
 
@@ -104,16 +105,22 @@ defmodule Cortex.Sync do
     tables = if table, do: [table], else: replicated_tables()
 
     Enum.map(tables, fn t ->
-      copies = try do
-        :mnesia.table_info(t, :all_nodes)
-      rescue
-        _ -> [node()]
-      end
+      copies =
+        try do
+          :mnesia.table_info(t, :all_nodes)
+        rescue
+          _ -> [node()]
+        end
 
       %{
         table: t,
         nodes: copies,
-        size: try do :mnesia.table_info(t, :size) rescue _ -> 0 end
+        size:
+          try do
+            :mnesia.table_info(t, :size)
+          rescue
+            _ -> 0
+          end
       }
     end)
   end
@@ -158,6 +165,7 @@ defmodule Cortex.Sync do
     for node <- mesh_nodes() do
       remove_replica(table, node)
     end
+
     :ok
   end
 
@@ -173,7 +181,7 @@ defmodule Cortex.Sync do
   end
 
   defp all_user_tables do
-    (:mnesia.system_info(:tables) -- [:schema | @system_tables])
+    :mnesia.system_info(:tables) -- [:schema | @system_tables]
   end
 
   defp replicated_tables do

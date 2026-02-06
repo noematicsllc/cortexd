@@ -49,7 +49,9 @@ defmodule Cortex.Mesh.DistConfigTest do
 
   describe "write_config/2" do
     test "writes config file to specified directory" do
-      dir = Path.join(System.tmp_dir!(), "cortex_dist_test_#{:erlang.unique_integer([:positive])}")
+      dir =
+        Path.join(System.tmp_dir!(), "cortex_dist_test_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(dir)
 
       on_exit(fn -> File.rm_rf!(dir) end)

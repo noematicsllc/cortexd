@@ -20,8 +20,10 @@ defmodule Cortex.Mesh.TokenTest do
     Application.put_env(:cortex, :mesh, mesh_config)
 
     on_exit(fn ->
-      if original_mesh, do: Application.put_env(:cortex, :mesh, original_mesh),
-      else: Application.delete_env(:cortex, :mesh)
+      if original_mesh,
+        do: Application.put_env(:cortex, :mesh, original_mesh),
+        else: Application.delete_env(:cortex, :mesh)
+
       File.rm_rf!(dir)
     end)
 
@@ -89,14 +91,18 @@ defmodule Cortex.Mesh.TokenTest do
         MH.mesh_config_for(certs, :node_b, "node-b", 5528, [
           {"node-a", "127.0.0.1", 5528}
         ])
+
       Application.put_env(:cortex, :mesh, mesh_config)
 
       # First generate as node-a
-      Application.put_env(:cortex, :mesh,
+      Application.put_env(
+        :cortex,
+        :mesh,
         MH.mesh_config_for(certs, :node_a, "node-a", 5528, [
           {"node-b", "127.0.0.1", 5528}
         ])
       )
+
       {:ok, token} = Token.generate("eve", "node-a", 1004)
 
       # Now verify as node-b (needs to find node-a's cert)
@@ -112,7 +118,17 @@ defmodule Cortex.Mesh.TokenTest do
       [_payload_b64, sig_b64] = String.split(token, ".")
 
       # Tamper with the payload
-      tampered_payload = Base.url_encode64(Jason.encode!(%{"fed_id" => "hacker", "origin_node" => "node-a", "origin_uid" => 9999, "issued_at" => System.system_time(:second), "expires_at" => System.system_time(:second) + 86400}))
+      tampered_payload =
+        Base.url_encode64(
+          Jason.encode!(%{
+            "fed_id" => "hacker",
+            "origin_node" => "node-a",
+            "origin_uid" => 9999,
+            "issued_at" => System.system_time(:second),
+            "expires_at" => System.system_time(:second) + 86400
+          })
+        )
+
       tampered_token = "#{tampered_payload}.#{sig_b64}"
 
       # Reconfigure to be able to find node-a's cert
@@ -120,6 +136,7 @@ defmodule Cortex.Mesh.TokenTest do
         MH.mesh_config_for(certs, :node_b, "node-b", 5528, [
           {"node-a", "127.0.0.1", 5528}
         ])
+
       Application.put_env(:cortex, :mesh, mesh_config)
 
       assert {:error, "invalid token signature"} = Token.verify(tampered_token)

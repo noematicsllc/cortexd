@@ -17,6 +17,7 @@ defmodule Cortex.SyncTest do
     on_exit(fn ->
       try do
         :mnesia.delete_table(table)
+
         :mnesia.transaction(fn ->
           :mnesia.delete({:cortex_meta, table})
           :mnesia.delete({:cortex_acls, {"uid:#{uid}", table}})

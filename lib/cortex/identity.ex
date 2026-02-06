@@ -48,6 +48,7 @@ defmodule Cortex.Identity do
       Enum.find_value(attrs, nil, fn
         {:AttributeTypeAndValue, {2, 5, 4, 3}, value} ->
           {:ok, to_string_value(value)}
+
         _ ->
           nil
       end)

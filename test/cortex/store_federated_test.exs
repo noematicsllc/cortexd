@@ -14,14 +14,15 @@ defmodule Cortex.StoreFederatedTest do
 
     # Set up mesh config so resolve_caller_fed_id works
     original_mesh = Application.get_env(:cortex, :mesh)
-    Application.put_env(:cortex, :mesh, [node_name: "test-node", tls_port: 5528])
+    Application.put_env(:cortex, :mesh, node_name: "test-node", tls_port: 5528)
 
     # Register a federated identity for this test
     {:ok, :ok} = Store.register_identity(fed_id, "test-node", uid)
 
     on_exit(fn ->
-      if original_mesh, do: Application.put_env(:cortex, :mesh, original_mesh),
-      else: Application.delete_env(:cortex, :mesh)
+      if original_mesh,
+        do: Application.put_env(:cortex, :mesh, original_mesh),
+        else: Application.delete_env(:cortex, :mesh)
 
       # Clean up identity
       try do
@@ -33,8 +34,10 @@ defmodule Cortex.StoreFederatedTest do
       # Clean up any created tables
       for table <- :mnesia.system_info(:tables) do
         name = Atom.to_string(table)
+
         if String.starts_with?(name, "@#{fed_id}:") or String.starts_with?(name, "#{uid}:") do
           :mnesia.delete_table(table)
+
           :mnesia.transaction(fn ->
             :mnesia.delete({:cortex_meta, table})
           end)
@@ -46,7 +49,10 @@ defmodule Cortex.StoreFederatedTest do
   end
 
   describe "federated table creation" do
-    test "creates table with @ prefix using caller's federated identity", %{uid: uid, fed_id: fed_id} do
+    test "creates table with @ prefix using caller's federated identity", %{
+      uid: uid,
+      fed_id: fed_id
+    } do
       table_name = "memories"
       {:ok, created} = Store.create_table(uid, "@#{table_name}", [:key, :value])
 
@@ -84,7 +90,10 @@ defmodule Cortex.StoreFederatedTest do
   end
 
   describe "federated table resolution" do
-    test "resolves @name to @fed_id:name for caller with federated identity", %{uid: uid, fed_id: fed_id} do
+    test "resolves @name to @fed_id:name for caller with federated identity", %{
+      uid: uid,
+      fed_id: fed_id
+    } do
       {:ok, table} = Store.create_table(uid, "@mydata", [:key, :value])
 
       resolved = Store.resolve_table(uid, "@mydata")

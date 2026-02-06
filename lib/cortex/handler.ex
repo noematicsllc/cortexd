@@ -109,8 +109,11 @@ defmodule Cortex.Handler do
   defp send_data(%{transport: :unix, socket: socket}, data), do: :gen_tcp.send(socket, data)
   defp send_data(%{transport: :tls, socket: socket}, data), do: :ssl.send(socket, data)
 
-  defp set_active_once(%{transport: :unix, socket: socket}), do: :inet.setopts(socket, [{:active, :once}])
-  defp set_active_once(%{transport: :tls, socket: socket}), do: :ssl.setopts(socket, [{:active, :once}])
+  defp set_active_once(%{transport: :unix, socket: socket}),
+    do: :inet.setopts(socket, [{:active, :once}])
+
+  defp set_active_once(%{transport: :tls, socket: socket}),
+    do: :ssl.setopts(socket, [{:active, :once}])
 
   defp process_buffer(buffer, uid) do
     case Msgpax.unpack_slice(buffer) do
@@ -304,13 +307,14 @@ defmodule Cortex.Handler do
     with :ok <- ACL.authorize(uid, table, :get) do
       case Store.get_table_meta(table) do
         {:ok, meta} ->
-          {:ok, %{
-            table: table_name,
-            owner: meta.owner,
-            key_field: meta.key_field,
-            attributes: meta.attributes,
-            node_scope: meta.node_scope
-          }}
+          {:ok,
+           %{
+             table: table_name,
+             owner: meta.owner,
+             key_field: meta.key_field,
+             attributes: meta.attributes,
+             node_scope: meta.node_scope
+           }}
 
         error ->
           error
@@ -393,31 +397,39 @@ defmodule Cortex.Handler do
 
   defp dispatch("mesh_list_nodes", _params, _uid) do
     case Cortex.mesh_config() do
-      nil -> {:error, "mesh networking not configured"}
+      nil ->
+        {:error, "mesh networking not configured"}
+
       config ->
         nodes = Keyword.get(config, :nodes, [])
-        formatted = Enum.map(nodes, fn {name, host, port} ->
-          %{name: name, host: host, port: port}
-        end)
+
+        formatted =
+          Enum.map(nodes, fn {name, host, port} ->
+            %{name: name, host: host, port: port}
+          end)
+
         {:ok, formatted}
     end
   end
 
   defp dispatch("mesh_status", _params, _uid) do
     case Cortex.mesh_config() do
-      nil -> {:error, "mesh networking not configured"}
+      nil ->
+        {:error, "mesh networking not configured"}
+
       config ->
         node_name = Keyword.get(config, :node_name, "unknown")
         nodes = Keyword.get(config, :nodes, [])
         connected = Node.list()
 
-        status = Enum.map(nodes, fn {name, host, port} ->
-          # Check if the Erlang node is connected
-          erlang_node = String.to_atom("cortex@#{host}")
-          connected? = erlang_node in connected
+        status =
+          Enum.map(nodes, fn {name, host, port} ->
+            # Check if the Erlang node is connected
+            erlang_node = String.to_atom("cortex@#{host}")
+            connected? = erlang_node in connected
 
-          %{name: name, host: host, port: port, connected: connected?}
-        end)
+            %{name: name, host: host, port: port, connected: connected?}
+          end)
 
         {:ok, %{node: node_name, peers: status}}
     end

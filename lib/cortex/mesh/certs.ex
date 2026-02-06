@@ -27,11 +27,17 @@ defmodule Cortex.Mesh.Certs do
            :ok <- File.chmod(ca_key_path, 0o600),
            :ok <-
              run_openssl([
-               "req", "-new", "-x509",
-               "-key", ca_key_path,
-               "-out", ca_cert_path,
-               "-days", to_string(@ca_validity_days),
-               "-subj", "/CN=Cortex Mesh CA"
+               "req",
+               "-new",
+               "-x509",
+               "-key",
+               ca_key_path,
+               "-out",
+               ca_cert_path,
+               "-days",
+               to_string(@ca_validity_days),
+               "-subj",
+               "/CN=Cortex Mesh CA"
              ]) do
         {:ok, ca_cert_path}
       end
@@ -69,31 +75,44 @@ defmodule Cortex.Mesh.Certs do
 
       # Build SAN extension config
       san_entries = ["DNS:#{node_name}"] ++ san_for_host(host)
-      ext_content = "subjectAltName=#{Enum.join(san_entries, ",")}\n" <>
-        "basicConstraints=CA:FALSE\n" <>
-        "keyUsage=digitalSignature,keyEncipherment\n" <>
-        "extendedKeyUsage=serverAuth,clientAuth\n"
+
+      ext_content =
+        "subjectAltName=#{Enum.join(san_entries, ",")}\n" <>
+          "basicConstraints=CA:FALSE\n" <>
+          "keyUsage=digitalSignature,keyEncipherment\n" <>
+          "extendedKeyUsage=serverAuth,clientAuth\n"
 
       with :ok <- run_openssl(["genrsa", "-out", node_key_path, "2048"]),
            :ok <- File.chmod(node_key_path, 0o600),
            :ok <-
              run_openssl([
-               "req", "-new",
-               "-key", node_key_path,
-               "-out", node_csr_path,
-               "-subj", "/CN=#{node_name}"
+               "req",
+               "-new",
+               "-key",
+               node_key_path,
+               "-out",
+               node_csr_path,
+               "-subj",
+               "/CN=#{node_name}"
              ]),
            :ok <- File.write(ext_path, ext_content),
            :ok <-
              run_openssl([
-               "x509", "-req",
-               "-in", node_csr_path,
-               "-CA", ca_cert_path,
-               "-CAkey", ca_key_path,
+               "x509",
+               "-req",
+               "-in",
+               node_csr_path,
+               "-CA",
+               ca_cert_path,
+               "-CAkey",
+               ca_key_path,
                "-CAcreateserial",
-               "-out", node_cert_path,
-               "-days", to_string(@node_validity_days),
-               "-extfile", ext_path
+               "-out",
+               node_cert_path,
+               "-days",
+               to_string(@node_validity_days),
+               "-extfile",
+               ext_path
              ]) do
         # Clean up temp files
         File.rm(node_csr_path)

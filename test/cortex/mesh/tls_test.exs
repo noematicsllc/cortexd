@@ -127,8 +127,9 @@ defmodule Cortex.Mesh.TLSTest do
       Application.put_env(:cortex, :mesh, mesh_config)
 
       on_exit(fn ->
-        if original_mesh, do: Application.put_env(:cortex, :mesh, original_mesh),
-        else: Application.delete_env(:cortex, :mesh)
+        if original_mesh,
+          do: Application.put_env(:cortex, :mesh, original_mesh),
+          else: Application.delete_env(:cortex, :mesh)
       end)
 
       # Start TLS server (it reads from Application env)

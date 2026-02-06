@@ -5,6 +5,7 @@ defmodule Cortex.Application do
 
   @impl true
   def start(_type, _args) do
+    # Mesh networking (only when configured)
     children =
       [
         # Initialize Mnesia
@@ -15,7 +16,6 @@ defmodule Cortex.Application do
         # Unix socket accept loop
         Cortex.Server
       ] ++
-        # Mesh networking (only when configured)
         if(Cortex.mesh_config(),
           do: [Cortex.Mesh.Manager, Cortex.TLSServer],
           else: []

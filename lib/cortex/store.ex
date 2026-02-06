@@ -115,31 +115,33 @@ defmodule Cortex.Store do
         {:error, reason}
 
       {:ok, {table_name, default_scope}} ->
+        key_field = hd(attributes)
+        node_scope = Keyword.get(opts, :node_scope, default_scope)
 
-    key_field = hd(attributes)
-    node_scope = Keyword.get(opts, :node_scope, default_scope)
+        mnesia_opts = [{:attributes, [:key, :data]}, {storage_type(), [node()]}]
 
-    mnesia_opts = [{:attributes, [:key, :data]}, {storage_type(), [node()]}]
+        case :mnesia.create_table(table_name, mnesia_opts) do
+          {:atomic, :ok} ->
+            # Store metadata (6-element record with node_scope)
+            :mnesia.transaction(fn ->
+              :mnesia.write(
+                {@meta_table, table_name, owner_uid, key_field, attributes, node_scope}
+              )
 
-    case :mnesia.create_table(table_name, mnesia_opts) do
-      {:atomic, :ok} ->
-        # Store metadata (6-element record with node_scope)
-        :mnesia.transaction(fn ->
-          :mnesia.write({@meta_table, table_name, owner_uid, key_field, attributes, node_scope})
-          # Owner gets full access
-          :mnesia.write(
-            {@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]}
-          )
-        end)
+              # Owner gets full access
+              :mnesia.write(
+                {@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]}
+              )
+            end)
 
-        {:ok, table_name}
+            {:ok, table_name}
 
-      {:aborted, {:already_exists, ^table_name}} ->
-        {:error, :already_exists}
+          {:aborted, {:already_exists, ^table_name}} ->
+            {:error, :already_exists}
 
-      {:aborted, reason} ->
-        {:error, reason}
-    end
+          {:aborted, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -424,7 +426,9 @@ defmodule Cortex.Store do
     case result do
       {:ok, :ok} ->
         case Cortex.Sync.apply_node_scope(table_name) do
-          :ok -> result
+          :ok ->
+            result
+
           {:error, reason} ->
             Logger.warning("Scope updated but replication failed: #{inspect(reason)}")
             {:error, {:replication_failed, reason}}
@@ -442,7 +446,12 @@ defmodule Cortex.Store do
       case :mnesia.read({@identities_table, fed_id}) do
         [] ->
           mappings = %{node_name => uid}
-          metadata = %{created_at: DateTime.utc_now() |> DateTime.to_iso8601(), created_by: node_name}
+
+          metadata = %{
+            created_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+            created_by: node_name
+          }
+
           :mnesia.write({@identities_table, fed_id, mappings, metadata})
 
         _ ->
@@ -605,7 +614,8 @@ defmodule Cortex.Store do
     case :mnesia.transaction(fn -> :mnesia.read({@meta_table, table_name}) end) do
       # 6-element record (with node_scope)
       {:atomic, [{@meta_table, ^table_name, owner, key_field, attributes, node_scope}]} ->
-        {:ok, %{owner: owner, key_field: key_field, attributes: attributes, node_scope: node_scope}}
+        {:ok,
+         %{owner: owner, key_field: key_field, attributes: attributes, node_scope: node_scope}}
 
       # 5-element record (pre-mesh, backward compatible — treat as :local)
       {:atomic, [{@meta_table, ^table_name, owner, key_field, attributes}]} ->

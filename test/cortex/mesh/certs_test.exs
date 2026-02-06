@@ -58,7 +58,10 @@ defmodule Cortex.Mesh.CertsTest do
       # Verify cert is signed by our CA
       {_output, 0} =
         System.cmd("openssl", [
-          "verify", "-CAfile", Path.join(dir, "ca.crt"), cert_path
+          "verify",
+          "-CAfile",
+          Path.join(dir, "ca.crt"),
+          cert_path
         ])
     end
 
