@@ -12,8 +12,8 @@ defmodule Cortex.Mesh.TokenTest do
 
     # Set up mesh config pointing to node-a's certs
     mesh_config =
-      MH.mesh_config_for(certs, :node_a, "node-a", 4711, [
-        {"node-b", "127.0.0.1", 4711}
+      MH.mesh_config_for(certs, :node_a, "node-a", 5528, [
+        {"node-b", "127.0.0.1", 5528}
       ])
 
     original_mesh = Application.get_env(:cortex, :mesh)
@@ -86,15 +86,15 @@ defmodule Cortex.Mesh.TokenTest do
 
       # Reconfigure as node-b to verify a token from node-a
       mesh_config =
-        MH.mesh_config_for(certs, :node_b, "node-b", 4711, [
-          {"node-a", "127.0.0.1", 4711}
+        MH.mesh_config_for(certs, :node_b, "node-b", 5528, [
+          {"node-a", "127.0.0.1", 5528}
         ])
       Application.put_env(:cortex, :mesh, mesh_config)
 
       # First generate as node-a
       Application.put_env(:cortex, :mesh,
-        MH.mesh_config_for(certs, :node_a, "node-a", 4711, [
-          {"node-b", "127.0.0.1", 4711}
+        MH.mesh_config_for(certs, :node_a, "node-a", 5528, [
+          {"node-b", "127.0.0.1", 5528}
         ])
       )
       {:ok, token} = Token.generate("eve", "node-a", 1004)
@@ -117,8 +117,8 @@ defmodule Cortex.Mesh.TokenTest do
 
       # Reconfigure to be able to find node-a's cert
       mesh_config =
-        MH.mesh_config_for(certs, :node_b, "node-b", 4711, [
-          {"node-a", "127.0.0.1", 4711}
+        MH.mesh_config_for(certs, :node_b, "node-b", 5528, [
+          {"node-a", "127.0.0.1", 5528}
         ])
       Application.put_env(:cortex, :mesh, mesh_config)
 

@@ -14,7 +14,7 @@ defmodule Cortex.StoreFederatedTest do
 
     # Set up mesh config so resolve_caller_fed_id works
     original_mesh = Application.get_env(:cortex, :mesh)
-    Application.put_env(:cortex, :mesh, [node_name: "test-node", tls_port: 4711])
+    Application.put_env(:cortex, :mesh, [node_name: "test-node", tls_port: 5528])
 
     # Register a federated identity for this test
     {:ok, :ok} = Store.register_identity(fed_id, "test-node", uid)

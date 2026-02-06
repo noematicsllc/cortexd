@@ -8,12 +8,12 @@ config :cortex,
 # Mesh networking (optional — omit to run in single-node mode)
 # config :cortex, :mesh,
 #   node_name: "my-node",
-#   tls_port: 4711,
+#   tls_port: 5528,
 #   ca_cert: "/etc/cortex/ca.crt",
 #   node_cert: "/etc/cortex/node.crt",
 #   node_key: "/etc/cortex/node.key",
 #   nodes: [
-#     {"peer-node", "192.168.1.10", 4711}
+#     {"peer-node", "192.168.1.10", 5528}
 #   ]
 
 # Development overrides

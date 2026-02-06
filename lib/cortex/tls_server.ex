@@ -20,7 +20,7 @@ defmodule Cortex.TLSServer do
         :ignore
 
       mesh_config ->
-        port = Keyword.get(mesh_config, :tls_port, 4711)
+        port = Keyword.get(mesh_config, :tls_port, 5528)
         ca_cert = Keyword.fetch!(mesh_config, :ca_cert)
         node_cert = Keyword.fetch!(mesh_config, :node_cert)
         node_key = Keyword.fetch!(mesh_config, :node_key)

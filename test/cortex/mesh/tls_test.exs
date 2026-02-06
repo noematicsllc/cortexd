@@ -117,7 +117,7 @@ defmodule Cortex.Mesh.TLSTest do
 
   describe "TLS handler pipeline" do
     test "TLS connection through handler returns correct response", %{certs: certs} do
-      test_port = 14_711 + rem(:erlang.unique_integer([:positive]), 10_000)
+      test_port = 15_528 + rem(:erlang.unique_integer([:positive]), 10_000)
 
       # Set up mesh config
       mesh_config =
