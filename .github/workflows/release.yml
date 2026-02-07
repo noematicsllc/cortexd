@@ -85,7 +85,7 @@ jobs:
           chmod +x dist/cortex-${{ matrix.target }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: cortex-${{ matrix.target }}
           path: |
