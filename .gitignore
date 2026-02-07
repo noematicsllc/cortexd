@@ -32,3 +32,9 @@ cortex-*.tar
 # Rust CLI build artifacts
 /cli/target/
 
+# Claude Code session data
+.claude/
+
+# OpenSpec working files
+openspec/
+

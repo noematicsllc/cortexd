@@ -49,9 +49,14 @@ defmodule Cortex.CLI do
     Client.call("tables")
   end
 
-  defp run(["create_table", name, attrs]) do
+  defp run(["create_table", name, attrs | rest]) do
+    {opts, _, _} = OptionParser.parse(rest, switches: [scope: :string])
     attributes = String.split(attrs, ",") |> Enum.map(&String.trim/1)
-    Client.call("create_table", [name, attributes])
+
+    case opts[:scope] do
+      nil -> Client.call("create_table", [name, attributes])
+      scope -> Client.call("create_table", [name, attributes, scope])
+    end
   end
 
   defp run(["drop_table", name]) do
@@ -100,6 +105,90 @@ defmodule Cortex.CLI do
 
   defp run(["acl", "list"]) do
     Client.call("acl_list", [])
+  end
+
+  # Scope commands
+
+  defp run(["scope", table]) do
+    Client.call("get_scope", [table])
+  end
+
+  defp run(["scope", table, scope]) do
+    Client.call("set_scope", [table, scope])
+  end
+
+  defp run(["info", table]) do
+    Client.call("table_info", [table])
+  end
+
+  # Identity commands
+
+  defp run(["identity", "register", name]) do
+    Client.call("identity_register", [name])
+  end
+
+  defp run(["identity", "claim", token]) do
+    Client.call("identity_claim", [token])
+  end
+
+  defp run(["identity", "list"]) do
+    Client.call("identity_list")
+  end
+
+  defp run(["identity", "revoke", name]) do
+    Client.call("identity_revoke", [name])
+  end
+
+  defp run(["identity", "revoke", name, node_name]) do
+    Client.call("identity_revoke", [name, node_name])
+  end
+
+  # Mesh commands
+
+  defp run(["mesh", "init-ca" | rest]) do
+    {opts, _, _} = OptionParser.parse(rest, switches: [force: :boolean, output: :string])
+    output_dir = opts[:output] || "cortex-mesh-ca"
+
+    case Cortex.Mesh.Certs.init_ca(output_dir, force: opts[:force] || false) do
+      {:ok, path} -> {:ok, "CA created: #{path}"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp run(["mesh", "add-node", name, host | rest]) do
+    {opts, _, _} = OptionParser.parse(rest, switches: [ca_dir: :string])
+    ca_dir = opts[:ca_dir] || "cortex-mesh-ca"
+
+    case Cortex.Mesh.Certs.add_node(ca_dir, name, host) do
+      {:ok, path} -> {:ok, "Node certificate created: #{path}"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp run(["mesh", "add-node" | _]) do
+    {:error, "usage: cortex mesh add-node <name> <host>"}
+  end
+
+  defp run(["mesh", "list-nodes"]) do
+    Client.call("mesh_list_nodes")
+  end
+
+  defp run(["mesh", "status"]) do
+    Client.call("mesh_status")
+  end
+
+  # Sync commands
+
+  defp run(["sync", "status"]) do
+    Client.call("sync_status")
+  end
+
+  defp run(["sync", "status", table]) do
+    Client.call("sync_status_table", [table])
+  end
+
+  defp run(["sync", "repair", table]) do
+    Client.call("sync_repair", [table])
   end
 
   defp run([]) do

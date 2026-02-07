@@ -18,4 +18,11 @@ defmodule Cortex do
   def data_dir do
     Application.get_env(:cortex, :data_dir, "/var/lib/cortex/mnesia")
   end
+
+  @doc """
+  Returns the mesh configuration, or nil if mesh networking is not configured.
+  """
+  def mesh_config do
+    Application.get_env(:cortex, :mesh)
+  end
 end
