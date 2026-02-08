@@ -113,6 +113,7 @@ defmodule Cortex.Mesh.Pairing do
       updated_nodes = existing_nodes ++ [{node_name, peer_host, tls_port}]
       updated_config = Keyword.put(state.config, :nodes, updated_nodes)
       Application.put_env(:cortex, :mesh, updated_config)
+      persist_mesh_env(updated_config)
       {:noreply, %{state | config: updated_config}}
     end
   end
@@ -240,6 +241,33 @@ defmodule Cortex.Mesh.Pairing do
     case :ssl.peername(ssl_socket) do
       {:ok, {ip, _port}} -> :inet.ntoa(ip) |> to_string()
       _ -> "unknown"
+    end
+  end
+
+  defp persist_mesh_env(config) do
+    env_path = "/etc/cortex/mesh.env"
+
+    peers_str =
+      config
+      |> Keyword.get(:nodes, [])
+      |> Enum.map(fn {name, host, port} -> "#{name}:#{host}:#{port}" end)
+      |> Enum.join(",")
+
+    content =
+      [
+        "CORTEX_MESH_NODE_NAME=#{Keyword.get(config, :node_name)}",
+        "CORTEX_MESH_TLS_PORT=#{Keyword.get(config, :tls_port, 5528)}",
+        "CORTEX_MESH_CA_CERT=#{Keyword.get(config, :ca_cert)}",
+        "CORTEX_MESH_NODE_CERT=#{Keyword.get(config, :node_cert)}",
+        "CORTEX_MESH_NODE_KEY=#{Keyword.get(config, :node_key)}",
+        "CORTEX_MESH_NODES=#{peers_str}",
+        "CORTEX_MESH_HOST=#{Keyword.get(config, :host, "127.0.0.1")}"
+      ]
+      |> Enum.join("\n")
+
+    case File.write(env_path, content <> "\n") do
+      :ok -> Logger.info("Updated #{env_path} with #{length(Keyword.get(config, :nodes, []))} peers")
+      {:error, reason} -> Logger.warning("Could not update #{env_path}: #{inspect(reason)}")
     end
   end
 end
