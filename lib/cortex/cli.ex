@@ -95,6 +95,10 @@ defmodule Cortex.CLI do
     Client.call("all", [table])
   end
 
+  defp run(["keys", table]) do
+    Client.call("keys", [table])
+  end
+
   defp run(["acl", "grant", identity, table, perms]) do
     Client.call("acl_grant", [identity, table, perms])
   end
@@ -840,6 +844,171 @@ defmodule Cortex.CLI do
     """)
   end
 
+  defp print_command_help(["keys"]) do
+    IO.puts("""
+    cortex keys - List all keys in a table
+
+    USAGE:
+      cortex keys TABLE [--pretty]
+
+    ARGUMENTS:
+      TABLE   Table name
+
+    DESCRIPTION:
+      Returns all primary keys in a table as a JSON array, without fetching
+      full record data.
+
+    OPTIONS:
+      --pretty    Pretty-print the JSON output
+
+    EXAMPLES:
+      cortex keys users
+      cortex keys sessions --pretty
+
+    SEE ALSO:
+      cortex all --help
+      cortex get --help
+    """)
+  end
+
+  defp print_command_help(["info"]) do
+    IO.puts("""
+    cortex info - Show table metadata
+
+    USAGE:
+      cortex info TABLE [--pretty]
+
+    ARGUMENTS:
+      TABLE   Table name
+
+    DESCRIPTION:
+      Returns metadata about a table including its attributes, size,
+      and storage type.
+
+    EXAMPLES:
+      cortex info users --pretty
+
+    SEE ALSO:
+      cortex tables --help
+      cortex scope --help
+    """)
+  end
+
+  defp print_command_help(["scope"]) do
+    IO.puts("""
+    cortex scope - Get or set table node scope
+
+    USAGE:
+      cortex scope TABLE              Get current scope
+      cortex scope TABLE SCOPE        Set scope
+
+    ARGUMENTS:
+      TABLE   Table name
+      SCOPE   One of: local, all, or comma-separated node list
+
+    DESCRIPTION:
+      Controls which mesh nodes replicate this table. "local" keeps data
+      on this node only, "all" replicates to every node in the mesh.
+
+    EXAMPLES:
+      cortex scope users
+      cortex scope users all
+      cortex scope users local
+      cortex scope users node-a,node-b
+
+    SEE ALSO:
+      cortex info --help
+      cortex mesh status --help
+    """)
+  end
+
+  defp print_command_help(["mesh"]) do
+    IO.puts("""
+    cortex mesh - Mesh networking commands
+
+    USAGE:
+      cortex mesh <subcommand> [args]
+
+    SUBCOMMANDS:
+      init-ca                       Initialize CA (manual workflow)
+      add-node NAME HOST            Generate node cert (manual workflow)
+      list-nodes                    List configured mesh nodes
+      status                        Show mesh connectivity
+
+    DESCRIPTION:
+      Manage mesh networking for multi-node Cortex clusters. For the
+      recommended token-based setup, use the Rust CLI (mesh init, mesh join,
+      mesh invite). These Elixir commands support the manual cert workflow
+      and runtime status checks.
+
+    EXAMPLES:
+      cortex mesh status --pretty
+      cortex mesh list-nodes
+      cortex mesh init-ca
+      cortex mesh add-node node-b 192.168.1.20
+
+    SEE ALSO:
+      cortex help mesh
+      cortex sync status --help
+    """)
+  end
+
+  defp print_command_help(["identity"]) do
+    IO.puts("""
+    cortex identity - Federated identity commands
+
+    USAGE:
+      cortex identity <subcommand> [args]
+
+    SUBCOMMANDS:
+      register NAME                 Register identity on this node
+      claim TOKEN                   Claim identity using a token
+      list                          List all identities
+      revoke NAME [NODE]            Revoke identity
+
+    DESCRIPTION:
+      Federated identity links a local UID to a name that other mesh
+      nodes can reference. This enables cross-node table access without
+      exposing raw UIDs.
+
+    EXAMPLES:
+      cortex identity register alice
+      cortex identity claim <token>
+      cortex identity list --pretty
+      cortex identity revoke alice
+      cortex identity revoke alice node-b
+
+    SEE ALSO:
+      cortex help identity
+      cortex mesh status --help
+    """)
+  end
+
+  defp print_command_help(["sync"]) do
+    IO.puts("""
+    cortex sync - Sync and replication commands
+
+    USAGE:
+      cortex sync <subcommand> [args]
+
+    SUBCOMMANDS:
+      status [TABLE]                Replication status overview (or per-table)
+      repair TABLE                  Repair table replication
+
+    DESCRIPTION:
+      Monitor and manage data replication across mesh nodes.
+
+    EXAMPLES:
+      cortex sync status --pretty
+      cortex sync status users
+      cortex sync repair users
+
+    SEE ALSO:
+      cortex mesh status --help
+      cortex scope --help
+    """)
+  end
+
   defp print_command_help(unknown) do
     cmd = Enum.join(unknown, " ")
 
@@ -847,9 +1016,12 @@ defmodule Cortex.CLI do
     Unknown help topic: #{cmd}
 
     Available commands:
-      ping, status, tables, create_table, drop_table,
-      get, put, delete, query, all,
-      acl, acl grant, acl revoke, acl list
+      ping, status, tables, create_table, drop_table, info, scope,
+      get, put, delete, query, all, keys,
+      acl, acl grant, acl revoke, acl list,
+      mesh, mesh init-ca, mesh add-node, mesh list-nodes, mesh status,
+      identity, identity register, identity claim, identity list, identity revoke,
+      sync, sync status, sync repair
 
     Available patterns:
       patterns, memories, statemachine, identities
@@ -876,15 +1048,31 @@ defmodule Cortex.CLI do
 
       create_table NAME ATTRS       Create table (ATTRS: comma-separated, first is key)
       drop_table NAME               Drop a table
+      info TABLE                    Show table metadata
+      scope TABLE [SCOPE]           Get/set table node scope
       get TABLE KEY                 Get record by key
       put TABLE JSON                Insert/update record
       delete TABLE KEY              Delete record
       query TABLE PATTERN           Query by pattern (JSON)
       all TABLE                     List all records
+      keys TABLE                    List all keys in a table
 
       acl grant IDENTITY TABLE PERMS    Grant permissions
       acl revoke IDENTITY TABLE PERMS   Revoke permissions
       acl list                          List ACLs for your tables
+
+      mesh init-ca                  Initialize CA (manual workflow)
+      mesh add-node NAME HOST       Generate node cert (manual workflow)
+      mesh list-nodes               List configured mesh nodes
+      mesh status                   Show mesh connectivity
+
+      identity register NAME        Register identity on this node
+      identity claim TOKEN          Claim identity using a token
+      identity list                 List all identities
+      identity revoke NAME [NODE]   Revoke identity
+
+      sync status [TABLE]           Replication status
+      sync repair TABLE             Repair table replication
 
     OPTIONS:
       --pretty                      Pretty-print JSON output

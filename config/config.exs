@@ -27,5 +27,7 @@ end
 if config_env() == :test do
   config :cortex,
     socket_path: Path.expand("../tmp/test_cortex.sock", __DIR__),
-    data_dir: Path.expand("../tmp/test_mnesia", __DIR__)
+    data_dir: Path.expand("../tmp/test_mnesia", __DIR__),
+    replication_max_attempts: 2,
+    replication_base_delay: 50
 end

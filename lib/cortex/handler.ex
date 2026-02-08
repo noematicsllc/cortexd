@@ -163,7 +163,12 @@ defmodule Cortex.Handler do
   end
 
   defp dispatch("tables", _params, uid, _requesting_node) do
-    tables = Store.tables(uid)
+    accessible = Store.tables_accessible_by(uid)
+
+    tables =
+      Enum.map(accessible, fn {name, _owner} -> name end)
+      |> Enum.uniq()
+
     {:ok, tables}
   end
 

@@ -151,14 +151,29 @@ defmodule Cortex.Sync do
 
   # Private
 
-  defp setup_replication(table, target_node) do
+  defp replication_max_attempts, do: Application.get_env(:cortex, :replication_max_attempts, 8)
+  defp replication_base_delay, do: Application.get_env(:cortex, :replication_base_delay, 250)
+
+  defp setup_replication(table, target_node, attempt \\ 1) do
     case :mnesia.add_table_copy(table, target_node, :disc_copies) do
       {:atomic, :ok} ->
+        if attempt > 1, do: Logger.info("Replicated #{table} to #{target_node} (attempt #{attempt})")
         Logger.debug("Replicated #{table} to #{target_node}")
         :ok
 
       {:aborted, {:already_exists, _, _}} ->
         :ok
+
+      {:aborted, {:not_active, _, _} = reason} ->
+        if attempt < replication_max_attempts() do
+          delay = replication_base_delay() * :math.pow(2, attempt - 1) |> trunc() |> min(5_000)
+          Logger.debug("Schema not active on #{target_node} for #{table}, retry #{attempt} in #{delay}ms")
+          Process.sleep(delay)
+          setup_replication(table, target_node, attempt + 1)
+        else
+          Logger.warning("Failed to replicate #{table} to #{target_node}: #{inspect(reason)}")
+          {:error, reason}
+        end
 
       {:aborted, reason} ->
         Logger.warning("Failed to replicate #{table} to #{target_node}: #{inspect(reason)}")

@@ -786,9 +786,13 @@ fn write_mesh_env(cfg: &MeshEnvConfig, env_path: &str) -> Result<(), String> {
 
 fn chown_mesh_dir(mesh_dir: &str) {
     // The daemon runs as cortex:cortex but mesh init/join runs as root.
-    // Make cert files readable by the daemon.
+    // Make cert files and mesh.env writable by the daemon.
     let _ = Command::new("chown")
         .args(["-R", "cortex:cortex", mesh_dir])
+        .output();
+    // Also chown mesh.env so daemon can update peers after pairing
+    let _ = Command::new("chown")
+        .args(["cortex:cortex", DEFAULT_MESH_ENV])
         .output();
 }
 
