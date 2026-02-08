@@ -168,6 +168,7 @@ fi
 # Set ownership
 chown -R cortex:cortex "$INSTALL_DIR"
 chown cortex:cortex "$RUN_DIR"
+chown -R cortex:cortex /etc/cortex
 
 # Install systemd service
 cat > /etc/systemd/system/cortexd.service << 'EOF'
