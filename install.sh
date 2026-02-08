@@ -6,7 +6,7 @@ set -e
 # Source install:   sudo ./install.sh --from-source
 
 VERSION="0.2.0"
-REPO="your-org/cortexd"  # TODO: update with actual repo
+REPO="noematicsllc/cortexd"
 INSTALL_DIR="/var/lib/cortex"
 BIN_DIR="/usr/local/bin"
 RUN_DIR="/run/cortex"
