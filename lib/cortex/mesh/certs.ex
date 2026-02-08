@@ -172,6 +172,7 @@ defmodule Cortex.Mesh.Certs do
         csr_path = Path.join(tmp_dir, "pairing_#{tmp_id}.csr")
         cert_path = Path.join(tmp_dir, "pairing_#{tmp_id}.crt")
         ext_path = Path.join(tmp_dir, "pairing_#{tmp_id}.ext")
+        serial_path = Path.join(tmp_dir, "pairing_#{tmp_id}.srl")
 
         try do
           with :ok <- File.write(csr_path, csr_pem),
@@ -187,6 +188,8 @@ defmodule Cortex.Mesh.Certs do
                      ca_cert_path,
                      "-CAkey",
                      ca_key_path,
+                     "-CAserial",
+                     serial_path,
                      "-CAcreateserial",
                      "-out",
                      cert_path,
@@ -202,6 +205,7 @@ defmodule Cortex.Mesh.Certs do
           File.rm(csr_path)
           File.rm(cert_path)
           File.rm(ext_path)
+          File.rm(serial_path)
         end
     end
   end
