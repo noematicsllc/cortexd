@@ -13,6 +13,14 @@ defmodule Cortex.Mesh.Manager do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  @doc """
+  Add a new peer and attempt connection immediately.
+  Called by Pairing after a successful join.
+  """
+  def add_peer(name, host, port) do
+    GenServer.cast(__MODULE__, {:add_peer, name, host, port})
+  end
+
   @impl true
   def init(_opts) do
     case Cortex.mesh_config() do
@@ -28,6 +36,7 @@ defmodule Cortex.Mesh.Manager do
 
         # Connect to peer nodes asynchronously
         send(self(), :connect_peers)
+        schedule_reconnect()
 
         {:ok, %{node_name: node_name, peers: nodes, config: config}}
     end
@@ -35,22 +44,67 @@ defmodule Cortex.Mesh.Manager do
 
   @impl true
   def handle_info(:connect_peers, state) do
+    connected = Node.list()
+
     for {name, host, _port} <- state.peers do
       erlang_node = String.to_atom("cortex@#{host}")
 
-      case Node.connect(erlang_node) do
-        true ->
-          Logger.info("Connected to mesh peer: #{name} (#{erlang_node})")
+      unless erlang_node in connected do
+        case Node.connect(erlang_node) do
+          true ->
+            Logger.info("Connected to mesh peer: #{name} (#{erlang_node})")
 
-        false ->
-          Logger.warning("Could not connect to mesh peer: #{name} (#{erlang_node})")
+          false ->
+            Logger.warning("Could not connect to mesh peer: #{name} (#{erlang_node})")
 
-        :ignored ->
-          Logger.debug("Connection to #{name} ignored (not distributed)")
+          :ignored ->
+            Logger.debug("Connection to #{name} ignored (not distributed)")
+        end
       end
     end
 
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:reconnect, state) do
+    connected = Node.list()
+
+    for {name, host, _port} <- state.peers do
+      erlang_node = String.to_atom("cortex@#{host}")
+
+      unless erlang_node in connected do
+        case Node.connect(erlang_node) do
+          true -> Logger.info("Reconnected to mesh peer: #{name} (#{erlang_node})")
+          _ -> :ok
+        end
+      end
+    end
+
+    schedule_reconnect()
+    {:noreply, state}
+  end
+
+  defp schedule_reconnect do
+    Process.send_after(self(), :reconnect, 30_000)
+  end
+
+  @impl true
+  def handle_cast({:add_peer, name, host, port}, state) do
+    if Enum.any?(state.peers, fn {n, _, _} -> n == name end) do
+      {:noreply, state}
+    else
+      peers = state.peers ++ [{name, host, port}]
+      erlang_node = String.to_atom("cortex@#{host}")
+
+      case Node.connect(erlang_node) do
+        true -> Logger.info("Connected to new mesh peer: #{name} (#{erlang_node})")
+        false -> Logger.warning("Could not connect to new mesh peer: #{name} (#{erlang_node})")
+        :ignored -> Logger.debug("Connection to #{name} ignored (not distributed)")
+      end
+
+      {:noreply, %{state | peers: peers}}
+    end
   end
 
   @impl true

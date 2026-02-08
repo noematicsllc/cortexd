@@ -198,8 +198,10 @@ defmodule Cortex.Mesh.Pairing do
             :ssl.send(ssl_socket, response)
             :ssl.close(ssl_socket)
 
-            # Add the new node to the seed's mesh peer list
+            # Add the new node to the seed's mesh peer list and connect
+            tls_port = Keyword.get(state.config, :tls_port, Cortex.default_tls_port())
             GenServer.cast(__MODULE__, {:add_peer, node_name, peer_host})
+            Cortex.Mesh.Manager.add_peer(node_name, peer_host, tls_port)
 
             Logger.info("Paired node: #{node_name}")
 
