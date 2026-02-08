@@ -1,5 +1,7 @@
 # Cortex
 
+> **Status: Experimental** — Cortex is under active development and not ready for production use. APIs, protocols, and data formats may change without notice. Use at your own risk.
+
 A local storage daemon providing an embedded Mnesia database accessible via Unix socket or mesh network. UID-based authentication for local connections, mTLS for remote nodes, with per-table access control.
 
 **Current version: 0.2.0**
