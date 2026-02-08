@@ -148,7 +148,9 @@ defmodule Cortex.Mesh.Pairing do
             handle_pair_request(ssl_socket, msgid, secret, csr_pem, node_name, state)
 
           {:ok, %{msgid: msgid, method: method}} ->
-            response = Protocol.encode_error(msgid, "method not available on pairing endpoint: #{method}")
+            response =
+              Protocol.encode_error(msgid, "method not available on pairing endpoint: #{method}")
+
             :ssl.send(ssl_socket, response)
             :ssl.close(ssl_socket)
 

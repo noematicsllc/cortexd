@@ -43,7 +43,12 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
       File.rm_rf!(dir)
     end)
 
-    {:ok, dir: dir, tls_port: tls_port, pairing_port: tls_port + 1, ca_cert: ca_cert, node_cert: node_cert}
+    {:ok,
+     dir: dir,
+     tls_port: tls_port,
+     pairing_port: tls_port + 1,
+     ca_cert: ca_cert,
+     node_cert: node_cert}
   end
 
   # Helper: generate an invite token the same way dispatch("mesh_invite") does
@@ -58,7 +63,12 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
     {:ok, token}
   end
 
-  test "full init→invite→join flow", %{pairing_port: pairing_port, ca_cert: ca_cert, dir: dir, tls_port: tls_port} do
+  test "full init→invite→join flow", %{
+    pairing_port: pairing_port,
+    ca_cert: ca_cert,
+    dir: dir,
+    tls_port: tls_port
+  } do
     # 1. Seed generates invite token (same logic as mesh_invite handler)
     {:ok, token} = generate_invite_token()
     assert String.starts_with?(token, "cxm_")
@@ -202,7 +212,11 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
     :ssl.close(s2)
   end
 
-  test "invite from any node produces a working token", %{pairing_port: port, ca_cert: ca_cert, dir: dir} do
+  test "invite from any node produces a working token", %{
+    pairing_port: port,
+    ca_cert: ca_cert,
+    dir: dir
+  } do
     # Generate two invite tokens — both should work independently
     {:ok, token1} = generate_invite_token()
     {:ok, token2} = generate_invite_token()
@@ -223,7 +237,12 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
 
     csr_pem1 = File.read!(csr1)
 
-    ssl_opts = [verify: :verify_peer, cacertfile: String.to_charlist(ca_cert), versions: [:"tlsv1.2"], active: false]
+    ssl_opts = [
+      verify: :verify_peer,
+      cacertfile: String.to_charlist(ca_cert),
+      versions: [:"tlsv1.2"],
+      active: false
+    ]
 
     {:ok, s1} = :ssl.connect(~c"127.0.0.1", port, ssl_opts, 5_000)
     req = Msgpax.pack!([0, 1, "mesh.pair", [d1.secret, csr_pem1, "inv1"]])

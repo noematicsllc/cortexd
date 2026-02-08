@@ -28,7 +28,8 @@ defmodule Cortex.Mesh.JoinToken do
           [host, port_str, secret, cert_fingerprint] ->
             case Integer.parse(port_str) do
               {port, ""} ->
-                {:ok, %{host: host, port: port, secret: secret, cert_fingerprint: cert_fingerprint}}
+                {:ok,
+                 %{host: host, port: port, secret: secret, cert_fingerprint: cert_fingerprint}}
 
               _ ->
                 {:error, "invalid port in join token"}

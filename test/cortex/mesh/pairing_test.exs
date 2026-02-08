@@ -34,7 +34,11 @@ defmodule Cortex.Mesh.PairingTest do
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid)
-      if prev_config, do: Application.put_env(:cortex, :mesh, prev_config), else: Application.delete_env(:cortex, :mesh)
+
+      if prev_config,
+        do: Application.put_env(:cortex, :mesh, prev_config),
+        else: Application.delete_env(:cortex, :mesh)
+
       File.rm_rf!(dir)
     end)
 
@@ -75,7 +79,10 @@ defmodule Cortex.Mesh.PairingTest do
   end
 
   describe "pairing listener" do
-    test "accepts TLS connections without client certificate", %{pairing_port: port, ca_cert: ca_cert} do
+    test "accepts TLS connections without client certificate", %{
+      pairing_port: port,
+      ca_cert: ca_cert
+    } do
       # Connect without a client cert — should succeed
       ssl_opts = [
         verify: :verify_peer,

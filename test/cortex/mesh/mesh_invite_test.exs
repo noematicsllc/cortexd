@@ -59,7 +59,10 @@ defmodule Cortex.Mesh.MeshInviteTest do
     assert String.length(decoded.cert_fingerprint) == 64
   end
 
-  test "mesh_invite produces different tokens each time", %{tls_port: tls_port, node_cert: node_cert} do
+  test "mesh_invite produces different tokens each time", %{
+    tls_port: tls_port,
+    node_cert: node_cert
+  } do
     {:ok, s1} = Pairing.add_secret()
     {:ok, s2} = Pairing.add_secret()
     {:ok, fingerprint} = JoinToken.cert_fingerprint(node_cert)

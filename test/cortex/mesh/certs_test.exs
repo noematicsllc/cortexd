@@ -163,7 +163,10 @@ defmodule Cortex.Mesh.CertsTest do
       csr_pem = File.read!(csr_path)
 
       assert {:ok, cert_pem} =
-               Cortex.Mesh.Certs.sign_csr(csr_pem, dir, node_name: "joiner-node", host: "10.0.0.5")
+               Cortex.Mesh.Certs.sign_csr(csr_pem, dir,
+                 node_name: "joiner-node",
+                 host: "10.0.0.5"
+               )
 
       assert cert_pem =~ "BEGIN CERTIFICATE"
 

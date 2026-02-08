@@ -73,7 +73,9 @@ defmodule Cortex.Mesh.JoinTokenTest do
   describe "cert_fingerprint/1" do
     test "computes SHA-256 of DER-encoded certificate" do
       # Generate a self-signed CA cert for testing
-      dir = System.tmp_dir!() |> Path.join("join_token_test_#{:erlang.unique_integer([:positive])}")
+      dir =
+        System.tmp_dir!() |> Path.join("join_token_test_#{:erlang.unique_integer([:positive])}")
+
       File.mkdir_p!(dir)
 
       key_path = Path.join(dir, "ca.key")
@@ -84,7 +86,19 @@ defmodule Cortex.Mesh.JoinTokenTest do
       {_, 0} =
         System.cmd(
           "openssl",
-          ["req", "-new", "-x509", "-key", key_path, "-out", cert_path, "-days", "1", "-subj", "/CN=Test CA"],
+          [
+            "req",
+            "-new",
+            "-x509",
+            "-key",
+            key_path,
+            "-out",
+            cert_path,
+            "-days",
+            "1",
+            "-subj",
+            "/CN=Test CA"
+          ],
           stderr_to_stdout: true
         )
 

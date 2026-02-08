@@ -170,8 +170,21 @@ defmodule Cortex.Mesh.Certs do
              :ok <- maybe_write_ext(ext_path, node_name, host),
              :ok <-
                run_openssl(
-                 ["x509", "-req", "-in", csr_path, "-CA", ca_cert_path, "-CAkey", ca_key_path,
-                  "-CAcreateserial", "-out", cert_path, "-days", to_string(@node_validity_days)] ++
+                 [
+                   "x509",
+                   "-req",
+                   "-in",
+                   csr_path,
+                   "-CA",
+                   ca_cert_path,
+                   "-CAkey",
+                   ca_key_path,
+                   "-CAcreateserial",
+                   "-out",
+                   cert_path,
+                   "-days",
+                   to_string(@node_validity_days)
+                 ] ++
                    if(File.exists?(ext_path), do: ["-extfile", ext_path], else: [])
                ),
              {:ok, cert_pem} <- File.read(cert_path) do
@@ -187,8 +200,8 @@ defmodule Cortex.Mesh.Certs do
 
   defp maybe_write_ext(ext_path, node_name, host) do
     san_entries =
-      (if(node_name, do: ["DNS:#{node_name}"], else: []) ++
-       if(host, do: san_for_host(host), else: []))
+      if(node_name, do: ["DNS:#{node_name}"], else: []) ++
+        if(host, do: san_for_host(host), else: [])
 
     if san_entries != [] do
       ext_content =
