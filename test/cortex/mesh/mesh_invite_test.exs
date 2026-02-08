@@ -49,12 +49,12 @@ defmodule Cortex.Mesh.MeshInviteTest do
   test "mesh_invite produces a valid cxm_ token", %{tls_port: tls_port, node_cert: node_cert} do
     {:ok, secret} = Pairing.add_secret()
     {:ok, fingerprint} = JoinToken.cert_fingerprint(node_cert)
-    token = JoinToken.encode("127.0.0.1", tls_port + 1, secret, fingerprint)
+    token = JoinToken.encode("127.0.0.1", tls_port, secret, fingerprint)
 
     assert String.starts_with?(token, "cxm_")
     assert {:ok, decoded} = JoinToken.decode(token)
     assert decoded.host == "127.0.0.1"
-    assert decoded.port == tls_port + 1
+    assert decoded.port == tls_port
     assert String.length(decoded.secret) == 64
     assert String.length(decoded.cert_fingerprint) == 64
   end
@@ -63,8 +63,8 @@ defmodule Cortex.Mesh.MeshInviteTest do
     {:ok, s1} = Pairing.add_secret()
     {:ok, s2} = Pairing.add_secret()
     {:ok, fingerprint} = JoinToken.cert_fingerprint(node_cert)
-    t1 = JoinToken.encode("127.0.0.1", tls_port + 1, s1, fingerprint)
-    t2 = JoinToken.encode("127.0.0.1", tls_port + 1, s2, fingerprint)
+    t1 = JoinToken.encode("127.0.0.1", tls_port, s1, fingerprint)
+    t2 = JoinToken.encode("127.0.0.1", tls_port, s2, fingerprint)
     assert t1 != t2
   end
 

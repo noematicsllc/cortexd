@@ -3,7 +3,7 @@
 ### Requirement: Join token encoding
 The system SHALL encode join tokens in the format `cxm_<base64url(host:port:secret:cert_fingerprint)>` where:
 - `host` is the seed node's IP address or hostname
-- `port` is the pairing port (tls_port + 1)
+- `port` is the TLS port (the pairing port is derived as tls_port + 1 by the joining client)
 - `secret` is a 32-byte cryptographically random value, hex-encoded (64 hex characters)
 - `cert_fingerprint` is the SHA-256 hash of the node certificate's DER encoding, hex-encoded (this is the certificate presented during TLS handshake, verifiable via `:ssl.peercert/1`)
 

@@ -458,7 +458,7 @@ defmodule Cortex.Handler do
 
             case Cortex.Mesh.JoinToken.cert_fingerprint(node_cert_path) do
               {:ok, fingerprint} ->
-                token = Cortex.Mesh.JoinToken.encode(host, tls_port + 1, secret, fingerprint)
+                token = Cortex.Mesh.JoinToken.encode(host, tls_port, secret, fingerprint)
                 {:ok, token}
 
               {:error, reason} ->

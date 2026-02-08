@@ -915,20 +915,21 @@ fn mesh_join(
     }
 
     // Step 1: Decode token
-    let (host, pairing_port, secret, cert_fingerprint) = match decode_join_token(token) {
+    let (host, tls_port, secret, cert_fingerprint) = match decode_join_token(token) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {}", e);
             return ExitCode::FAILURE;
         }
     };
+    let pairing_port = tls_port + 1;
 
     let node_name = name
         .map(String::from)
         .unwrap_or_else(default_node_name);
 
     eprintln!("Joining mesh...");
-    eprintln!("  Seed: {}:{}", host, pairing_port);
+    eprintln!("  Seed: {}:{}", host, tls_port);
     eprintln!("  Node name: {}", node_name);
 
     // Step 2: Generate local keypair + CSR

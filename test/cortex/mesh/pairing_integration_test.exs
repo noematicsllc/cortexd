@@ -54,19 +54,19 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
     tls_port = Keyword.get(config, :tls_port, 5528)
     host = Keyword.get(config, :host, "127.0.0.1")
     {:ok, fingerprint} = JoinToken.cert_fingerprint(node_cert_path)
-    token = JoinToken.encode(host, tls_port + 1, secret, fingerprint)
+    token = JoinToken.encode(host, tls_port, secret, fingerprint)
     {:ok, token}
   end
 
-  test "full init→invite→join flow", %{pairing_port: port, ca_cert: ca_cert, dir: dir} do
+  test "full init→invite→join flow", %{pairing_port: pairing_port, ca_cert: ca_cert, dir: dir, tls_port: tls_port} do
     # 1. Seed generates invite token (same logic as mesh_invite handler)
     {:ok, token} = generate_invite_token()
     assert String.starts_with?(token, "cxm_")
 
-    # 2. Decode the token
+    # 2. Decode the token — port is the TLS port, pairing is tls_port + 1
     {:ok, decoded} = JoinToken.decode(token)
     assert decoded.host == "127.0.0.1"
-    assert decoded.port == port
+    assert decoded.port == tls_port
 
     # 3. Joiner generates keypair + CSR
     joiner_key = Path.join(dir, "joiner.key")
@@ -90,7 +90,7 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
       active: false
     ]
 
-    {:ok, socket} = :ssl.connect(~c"127.0.0.1", port, ssl_opts, 5_000)
+    {:ok, socket} = :ssl.connect(~c"127.0.0.1", pairing_port, ssl_opts, 5_000)
 
     # Verify fingerprint matches token
     {:ok, cert_der} = :ssl.peercert(socket)
@@ -116,7 +116,7 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
     {_, 0} = System.cmd("openssl", ["verify", "-CAfile", ca_cert, cert_tmp])
 
     # 6. Token secret is now consumed — replay should fail
-    {:ok, socket2} = :ssl.connect(~c"127.0.0.1", port, ssl_opts, 5_000)
+    {:ok, socket2} = :ssl.connect(~c"127.0.0.1", pairing_port, ssl_opts, 5_000)
 
     request2 = Msgpax.pack!([0, 2, "mesh.pair", [decoded.secret, csr_pem, "replay-node"]])
     :ok = :ssl.send(socket2, request2)
