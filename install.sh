@@ -72,16 +72,23 @@ install_from_binary() {
         exit 1
     fi
 
+    # Download CLI binary
+    local cli_name="cortex-linux-${arch}"
+    local cli_url="https://github.com/${REPO}/releases/download/v${VERSION}/${cli_name}"
+
     echo -n "Installing... "
     tar -xzf "${tmpdir}/${tarball}" -C "$tmpdir"
 
-    # Install daemon release
-    cp -r "${tmpdir}/cortexd/"* "$INSTALL_DIR/bin/" 2>/dev/null || true
+    # Install daemon release (Mix release name is "cortex")
+    cp -r "${tmpdir}/cortex/"* "$INSTALL_DIR/bin/" 2>/dev/null || true
 
-    # Install CLI binary
-    if [ -f "${tmpdir}/cortex" ]; then
-        cp "${tmpdir}/cortex" "$BIN_DIR/cortex"
+    # Download and install CLI binary
+    if curl -fSL -o "${tmpdir}/cortex-cli" "$cli_url" 2>/dev/null; then
+        cp "${tmpdir}/cortex-cli" "$BIN_DIR/cortex"
         chmod 755 "$BIN_DIR/cortex"
+    else
+        echo ""
+        echo "  Warning: CLI binary download failed. Daemon installed, but 'cortex' CLI not available."
     fi
 
     echo "done"
