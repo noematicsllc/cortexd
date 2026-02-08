@@ -16,8 +16,8 @@ const DEFAULT_SOCKET: &str = "/run/cortex/cortex.sock";
 // for subdivisions of the cerebral cortex:
 //
 //   5528  Cortex cerebri    — Mesh TLS (main inter-node traffic)
-//   5529  Allocortex        — Pairing (simpler handshake for new nodes)
-//   5530  Archicortex       — (reserved: replication/sync)
+//   5529  Allocortex        — Pairing (join handshake for new nodes)
+//   5530  Archicortex       — Erlang distribution (replication/sync)
 //   5531  Paleocortex       — (reserved: discovery/monitoring)
 //   5532  Neocortex         — (reserved: compute/orchestration)
 //   5533  Juxtallocortex    — (reserved: gateway/proxy)
