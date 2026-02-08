@@ -419,10 +419,28 @@ fn main() -> ExitCode {
             AclCommands::List => call(&cli.socket, "acl_list", vec![]),
         },
         Some(Commands::Mesh { command }) => match command {
-            MeshCommands::Init { host, name, port, force, dir } => {
-                return mesh_init(&cli.socket, host.as_deref(), name.as_deref(), *port, *force, dir.as_deref());
+            MeshCommands::Init {
+                host,
+                name,
+                port,
+                force,
+                dir,
+            } => {
+                return mesh_init(
+                    &cli.socket,
+                    host.as_deref(),
+                    name.as_deref(),
+                    *port,
+                    *force,
+                    dir.as_deref(),
+                );
             }
-            MeshCommands::Join { token, name, force, dir } => {
+            MeshCommands::Join {
+                token,
+                name,
+                force,
+                dir,
+            } => {
                 return mesh_join(&cli.socket, token, name.as_deref(), *force, dir.as_deref());
             }
             MeshCommands::Invite => call(&cli.socket, "mesh_invite", vec![]),
@@ -776,7 +794,10 @@ fn restart_daemon_and_wait(socket_path: &str) -> Result<(), String> {
         }
     }
 
-    Err("daemon did not become healthy within 10 seconds.\nCheck: journalctl -u cortexd".to_string())
+    Err(
+        "daemon did not become healthy within 10 seconds.\nCheck: journalctl -u cortexd"
+            .to_string(),
+    )
 }
 
 fn mesh_init(
@@ -787,7 +808,9 @@ fn mesh_init(
     force: bool,
     dir: Option<&str>,
 ) -> ExitCode {
-    let mesh_dir = dir.map(String::from).unwrap_or_else(|| DEFAULT_MESH_CERT_DIR.to_string());
+    let mesh_dir = dir
+        .map(String::from)
+        .unwrap_or_else(|| DEFAULT_MESH_CERT_DIR.to_string());
     let ca_key = format!("{}/ca.key", mesh_dir);
 
     // Check if already exists
@@ -799,9 +822,7 @@ fn mesh_init(
         return ExitCode::FAILURE;
     }
 
-    let node_name = name
-        .map(String::from)
-        .unwrap_or_else(default_node_name);
+    let node_name = name.map(String::from).unwrap_or_else(default_node_name);
 
     let host_str = match host {
         Some(h) => h.to_string(),
@@ -846,7 +867,9 @@ fn mesh_init(
 
     // Step 3: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
-    if let Err(e) = write_mesh_env(&node_name, port, &ca_cert, &node_cert, &node_key, "", env_path) {
+    if let Err(e) = write_mesh_env(
+        &node_name, port, &ca_cert, &node_cert, &node_key, "", env_path,
+    ) {
         eprintln!("error: {}", e);
         return ExitCode::FAILURE;
     }
@@ -915,7 +938,9 @@ fn mesh_join(
     force: bool,
     dir: Option<&str>,
 ) -> ExitCode {
-    let mesh_dir = dir.map(String::from).unwrap_or_else(|| DEFAULT_MESH_CERT_DIR.to_string());
+    let mesh_dir = dir
+        .map(String::from)
+        .unwrap_or_else(|| DEFAULT_MESH_CERT_DIR.to_string());
     let ca_cert_path = format!("{}/ca.crt", mesh_dir);
 
     // Check if already exists
@@ -937,9 +962,7 @@ fn mesh_join(
     };
     let pairing_port = tls_port + PAIRING_PORT_OFFSET;
 
-    let node_name = name
-        .map(String::from)
-        .unwrap_or_else(default_node_name);
+    let node_name = name.map(String::from).unwrap_or_else(default_node_name);
 
     eprintln!("Joining mesh...");
     eprintln!("  Seed: {}:{}", host, tls_port);
@@ -966,7 +989,13 @@ fn mesh_join(
     }
 
     if let Err(e) = run_openssl(&[
-        "req", "-new", "-key", &node_key, "-out", &node_csr, "-subj",
+        "req",
+        "-new",
+        "-key",
+        &node_key,
+        "-out",
+        &node_csr,
+        "-subj",
         &format!("/CN={}", node_name),
     ]) {
         eprintln!("error: {}", e);
@@ -1142,17 +1171,31 @@ fn mesh_join(
 
     let peers_str = match peers_value {
         Some(Value::Array(arr)) => {
-            let entries: Vec<String> = arr.iter().filter_map(|entry| {
-                if let Value::Array(parts) = entry {
-                    if parts.len() >= 3 {
-                        let name = match &parts[0] { Value::String(s) => s.as_str().unwrap_or("").to_string(), _ => return None };
-                        let host = match &parts[1] { Value::String(s) => s.as_str().unwrap_or("").to_string(), _ => return None };
-                        let port = match &parts[2] { Value::Integer(i) => i.as_u64().unwrap_or(DEFAULT_TLS_PORT as u64).to_string(), _ => return None };
-                        return Some(format!("{}:{}:{}", name, host, port));
+            let entries: Vec<String> = arr
+                .iter()
+                .filter_map(|entry| {
+                    if let Value::Array(parts) = entry {
+                        if parts.len() >= 3 {
+                            let name = match &parts[0] {
+                                Value::String(s) => s.as_str().unwrap_or("").to_string(),
+                                _ => return None,
+                            };
+                            let host = match &parts[1] {
+                                Value::String(s) => s.as_str().unwrap_or("").to_string(),
+                                _ => return None,
+                            };
+                            let port = match &parts[2] {
+                                Value::Integer(i) => {
+                                    i.as_u64().unwrap_or(DEFAULT_TLS_PORT as u64).to_string()
+                                }
+                                _ => return None,
+                            };
+                            return Some(format!("{}:{}:{}", name, host, port));
+                        }
                     }
-                }
-                None
-            }).collect();
+                    None
+                })
+                .collect();
             entries.join(",")
         }
         _ => String::new(),
@@ -1182,7 +1225,15 @@ fn mesh_join(
 
     // Step 8: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
-    if let Err(e) = write_mesh_env(&node_name, tls_port, &ca_cert_path, &node_cert_path, &node_key, &peers_str, env_path) {
+    if let Err(e) = write_mesh_env(
+        &node_name,
+        tls_port,
+        &ca_cert_path,
+        &node_cert_path,
+        &node_key,
+        &peers_str,
+        env_path,
+    ) {
         eprintln!("error: {}", e);
         return ExitCode::FAILURE;
     }
