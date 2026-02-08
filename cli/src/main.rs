@@ -890,9 +890,9 @@ fn decode_join_token(token: &str) -> Result<(String, u16, String, String), Strin
         .parse()
         .map_err(|_| "invalid join token: bad port".to_string())?;
     let secret = parts[2].to_string();
-    let ca_fingerprint = parts[3].to_string();
+    let cert_fingerprint = parts[3].to_string();
 
-    Ok((host, port, secret, ca_fingerprint))
+    Ok((host, port, secret, cert_fingerprint))
 }
 
 fn mesh_join(
@@ -915,7 +915,7 @@ fn mesh_join(
     }
 
     // Step 1: Decode token
-    let (host, pairing_port, secret, ca_fingerprint) = match decode_join_token(token) {
+    let (host, pairing_port, secret, cert_fingerprint) = match decode_join_token(token) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -1010,9 +1010,9 @@ fn mesh_join(
     let cert_der = peer_cert.to_der().unwrap_or_default();
     let fingerprint = format!("{:x}", Sha256::digest(&cert_der));
 
-    if fingerprint != ca_fingerprint {
+    if fingerprint != cert_fingerprint {
         eprintln!("error: CA fingerprint mismatch!");
-        eprintln!("  Expected: {}", ca_fingerprint);
+        eprintln!("  Expected: {}", cert_fingerprint);
         eprintln!("  Got:      {}", fingerprint);
         eprintln!("  This may indicate a man-in-the-middle attack.");
         return ExitCode::FAILURE;

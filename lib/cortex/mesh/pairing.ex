@@ -179,6 +179,9 @@ defmodule Cortex.Mesh.Pairing do
             :ssl.send(ssl_socket, response)
             :ssl.close(ssl_socket)
 
+            # Add the new node to the seed's mesh peer list
+            add_peer_to_config(node_name, state.config)
+
             Logger.info("Paired node: #{node_name}")
 
           {:error, reason} ->
@@ -209,7 +212,18 @@ defmodule Cortex.Mesh.Pairing do
   end
 
   defp node_host(config) do
-    # Try to determine this node's host from cert SAN or config
     Keyword.get(config, :host, "127.0.0.1")
+  end
+
+  defp add_peer_to_config(node_name, config) do
+    tls_port = Keyword.get(config, :tls_port, 5528)
+    existing_nodes = Keyword.get(config, :nodes, [])
+
+    # Don't add if a peer with this name already exists
+    unless Enum.any?(existing_nodes, fn {name, _, _} -> name == node_name end) do
+      updated_nodes = existing_nodes ++ [{node_name, node_name, tls_port}]
+      updated_config = Keyword.put(config, :nodes, updated_nodes)
+      Application.put_env(:cortex, :mesh, updated_config)
+    end
   end
 end

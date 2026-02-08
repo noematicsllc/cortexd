@@ -14,7 +14,7 @@ defmodule Cortex.Mesh.JoinTokenTest do
       assert decoded.host == "158.69.220.39"
       assert decoded.port == 5529
       assert decoded.secret == secret
-      assert decoded.ca_fingerprint == fingerprint
+      assert decoded.cert_fingerprint == fingerprint
     end
 
     test "round-trip with hostname" do

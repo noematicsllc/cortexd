@@ -2,7 +2,7 @@ defmodule Cortex.Mesh.JoinToken do
   @moduledoc """
   Join tokens for mesh pairing.
 
-  Encodes/decodes join tokens in the format `cxm_<base64url(host:port:secret:ca_fingerprint)>`.
+  Encodes/decodes join tokens in the format `cxm_<base64url(host:port:secret:cert_fingerprint)>`.
   These are distinct from identity claim tokens in `Cortex.Mesh.Token`.
   """
 
@@ -10,25 +10,25 @@ defmodule Cortex.Mesh.JoinToken do
 
   @doc """
   Encode a join token from its components.
-  Returns a string like `cxm_<base64url(host:port:secret:ca_fingerprint)>`.
+  Returns a string like `cxm_<base64url(host:port:secret:cert_fingerprint)>`.
   """
-  def encode(host, port, secret, ca_fingerprint) do
-    payload = "#{host}:#{port}:#{secret}:#{ca_fingerprint}"
+  def encode(host, port, secret, cert_fingerprint) do
+    payload = "#{host}:#{port}:#{secret}:#{cert_fingerprint}"
     @prefix <> Base.url_encode64(payload, padding: false)
   end
 
   @doc """
   Decode a join token string.
-  Returns `{:ok, %{host: ..., port: ..., secret: ..., ca_fingerprint: ...}}` or `{:error, reason}`.
+  Returns `{:ok, %{host: ..., port: ..., secret: ..., cert_fingerprint: ...}}` or `{:error, reason}`.
   """
   def decode(@prefix <> encoded) do
     case Base.url_decode64(encoded, padding: false) do
       {:ok, payload} ->
         case String.split(payload, ":") do
-          [host, port_str, secret, ca_fingerprint] ->
+          [host, port_str, secret, cert_fingerprint] ->
             case Integer.parse(port_str) do
               {port, ""} ->
-                {:ok, %{host: host, port: port, secret: secret, ca_fingerprint: ca_fingerprint}}
+                {:ok, %{host: host, port: port, secret: secret, cert_fingerprint: cert_fingerprint}}
 
               _ ->
                 {:error, "invalid port in join token"}

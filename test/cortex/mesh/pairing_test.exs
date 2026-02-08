@@ -161,6 +161,50 @@ defmodule Cortex.Mesh.PairingTest do
       :ssl.close(socket)
     end
 
+    test "successful pair adds new node to seed's mesh config",
+         %{pairing_port: port, ca_cert: ca_cert, dir: dir} do
+      {:ok, secret} = Pairing.add_secret()
+
+      key_path = Path.join(dir, "peer_add.key")
+      csr_path = Path.join(dir, "peer_add.csr")
+      {_, 0} = System.cmd("openssl", ["genrsa", "-out", key_path, "2048"], stderr_to_stdout: true)
+
+      {_, 0} =
+        System.cmd(
+          "openssl",
+          ["req", "-new", "-key", key_path, "-out", csr_path, "-subj", "/CN=new-peer"],
+          stderr_to_stdout: true
+        )
+
+      csr_pem = File.read!(csr_path)
+
+      ssl_opts = [
+        verify: :verify_peer,
+        cacertfile: String.to_charlist(ca_cert),
+        versions: [:"tlsv1.2"],
+        active: false
+      ]
+
+      # Before pairing, seed has no peers
+      config_before = Application.get_env(:cortex, :mesh)
+      assert Keyword.get(config_before, :nodes, []) == []
+
+      {:ok, socket} = :ssl.connect(~c"127.0.0.1", port, ssl_opts, 5_000)
+      request = Msgpax.pack!([0, 1, "mesh.pair", [secret, csr_pem, "new-peer"]])
+      :ok = :ssl.send(socket, request)
+      {:ok, response_data} = :ssl.recv(socket, 0, 10_000)
+      {:ok, [1, 1, nil, _result]} = Msgpax.unpack(response_data)
+      :ssl.close(socket)
+
+      # Give the spawned handler process time to update config
+      Process.sleep(100)
+
+      # After pairing, seed should have the new peer in its config
+      config_after = Application.get_env(:cortex, :mesh)
+      nodes = Keyword.get(config_after, :nodes, [])
+      assert Enum.any?(nodes, fn {name, _, _} -> name == "new-peer" end)
+    end
+
     test "mesh.pair with invalid secret returns error", %{pairing_port: port, ca_cert: ca_cert} do
       ssl_opts = [
         verify: :verify_peer,

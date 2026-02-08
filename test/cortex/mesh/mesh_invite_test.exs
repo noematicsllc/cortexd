@@ -56,7 +56,7 @@ defmodule Cortex.Mesh.MeshInviteTest do
     assert decoded.host == "127.0.0.1"
     assert decoded.port == tls_port + 1
     assert String.length(decoded.secret) == 64
-    assert String.length(decoded.ca_fingerprint) == 64
+    assert String.length(decoded.cert_fingerprint) == 64
   end
 
   test "mesh_invite produces different tokens each time", %{tls_port: tls_port, node_cert: node_cert} do

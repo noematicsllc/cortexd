@@ -95,7 +95,7 @@ defmodule Cortex.Mesh.PairingIntegrationTest do
     # Verify fingerprint matches token
     {:ok, cert_der} = :ssl.peercert(socket)
     actual_fp = :crypto.hash(:sha256, cert_der) |> Base.encode16(case: :lower)
-    assert actual_fp == decoded.ca_fingerprint
+    assert actual_fp == decoded.cert_fingerprint
 
     # Send mesh.pair
     request = Msgpax.pack!([0, 1, "mesh.pair", [decoded.secret, csr_pem, "joiner-node"]])

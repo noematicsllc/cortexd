@@ -462,7 +462,7 @@ defmodule Cortex.Handler do
                 {:ok, token}
 
               {:error, reason} ->
-                {:error, "failed to compute CA fingerprint: #{inspect(reason)}"}
+                {:error, "failed to compute cert fingerprint: #{inspect(reason)}"}
             end
 
           {:error, reason} ->
