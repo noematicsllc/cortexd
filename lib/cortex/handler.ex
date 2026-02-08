@@ -444,6 +444,10 @@ defmodule Cortex.Handler do
     end
   end
 
+  defp dispatch("mesh_invite", _params, uid, _requesting_node) when uid != 0 do
+    {:error, "mesh_invite requires root (uid 0)"}
+  end
+
   defp dispatch("mesh_invite", _params, _uid, _requesting_node) do
     case Cortex.mesh_config() do
       nil ->

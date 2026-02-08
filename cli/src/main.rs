@@ -740,19 +740,29 @@ fn default_node_name() -> String {
 fn detect_host_ip() -> Result<String, String> {
     // Try to detect primary IP by connecting to a public address
     // (doesn't actually send data, just determines the local interface)
-    match std::net::UdpSocket::bind("0.0.0.0:0") {
-        Ok(socket) => {
-            // Connect to a public DNS — this picks the default route interface
-            match socket.connect("8.8.8.8:80") {
-                Ok(_) => match socket.local_addr() {
-                    Ok(addr) => Ok(addr.ip().to_string()),
-                    Err(_) => Ok("127.0.0.1".to_string()),
-                },
-                Err(_) => Ok("127.0.0.1".to_string()),
-            }
-        }
-        Err(_) => Ok("127.0.0.1".to_string()),
-    }
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| {
+        format!(
+            "failed to detect host IP: {}\nUse --host to specify manually",
+            e
+        )
+    })?;
+
+    // Connect to a public DNS — this picks the default route interface
+    socket.connect("8.8.8.8:80").map_err(|e| {
+        format!(
+            "failed to detect host IP (no network route): {}\nUse --host to specify manually",
+            e
+        )
+    })?;
+
+    let addr = socket.local_addr().map_err(|e| {
+        format!(
+            "failed to detect host IP: {}\nUse --host to specify manually",
+            e
+        )
+    })?;
+
+    Ok(addr.ip().to_string())
 }
 
 struct MeshEnvConfig<'a> {
@@ -775,16 +785,38 @@ fn write_mesh_env(cfg: &MeshEnvConfig, env_path: &str) -> Result<(), String> {
 }
 
 fn restart_daemon_and_wait(socket_path: &str) -> Result<(), String> {
-    let output = Command::new("systemctl")
-        .args(["restart", "cortexd"])
+    // Detect init system and restart accordingly
+    let (cmd, args, log_hint): (&str, Vec<&str>, &str) =
+        if std::path::Path::new("/run/systemd/system").exists() {
+            (
+                "systemctl",
+                vec!["restart", "cortexd"],
+                "journalctl -u cortexd",
+            )
+        } else if cfg!(target_os = "macos") {
+            (
+                "launchctl",
+                vec!["kickstart", "-k", "system/com.cortex.cortexd"],
+                "log show --predicate 'subsystem == \"com.cortex\"' --last 1m",
+            )
+        } else {
+            return Err("unsupported init system: cannot auto-restart.\n\
+                 Please restart cortexd manually, then re-run this command."
+                .to_string());
+        };
+
+    let output = Command::new(cmd)
+        .args(&args)
         .output()
-        .map_err(|e| format!("failed to run systemctl: {}", e))?;
+        .map_err(|e| format!("failed to run {}: {}", cmd, e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
-            "systemctl restart failed: {}\nCheck: journalctl -u cortexd",
-            stderr.trim()
+            "{} restart failed: {}\nCheck: {}",
+            cmd,
+            stderr.trim(),
+            log_hint
         ));
     }
 
@@ -796,10 +828,10 @@ fn restart_daemon_and_wait(socket_path: &str) -> Result<(), String> {
         }
     }
 
-    Err(
-        "daemon did not become healthy within 10 seconds.\nCheck: journalctl -u cortexd"
-            .to_string(),
-    )
+    Err(format!(
+        "daemon did not become healthy within 10 seconds.\nCheck: {}",
+        log_hint
+    ))
 }
 
 fn mesh_init(
@@ -974,6 +1006,16 @@ fn mesh_join(
     let pairing_port = tls_port + PAIRING_PORT_OFFSET;
 
     let node_name = name.map(String::from).unwrap_or_else(default_node_name);
+
+    // Validate node name (same rules as mesh_init)
+    if !node_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        || node_name.is_empty()
+    {
+        eprintln!("error: invalid node name: must be alphanumeric with hyphens/underscores");
+        return ExitCode::FAILURE;
+    }
 
     eprintln!("Joining mesh...");
     eprintln!("  Seed: {}:{}", host, tls_port);
@@ -1235,23 +1277,29 @@ fn mesh_join(
 
     eprintln!("  Certificate signed by mesh CA.");
 
-    // Determine TLS port from peers (first peer's port)
-    let tls_port: u16 = peers_str
+    // Determine TLS port from peers (first peer's port), fall back to token's port
+    let mesh_tls_port: u16 = peers_str
         .split(',')
         .next()
         .and_then(|p| p.split(':').nth(2))
         .and_then(|p| p.parse().ok())
-        .unwrap_or(DEFAULT_TLS_PORT);
+        .unwrap_or(tls_port);
 
     // Detect this node's host IP
-    let join_host = detect_host_ip().unwrap_or_else(|_| "127.0.0.1".to_string());
+    let join_host = match detect_host_ip() {
+        Ok(ip) => ip,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
 
     // Step 8: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
     if let Err(e) = write_mesh_env(
         &MeshEnvConfig {
             node_name: &node_name,
-            tls_port,
+            tls_port: mesh_tls_port,
             ca_cert: &ca_cert_path,
             node_cert: &node_cert_path,
             node_key: &node_key,

@@ -132,15 +132,18 @@ defmodule Cortex.Mesh.Certs do
     - :force - overwrite existing files (default: false)
   """
   def init_mesh(output_dir, opts \\ []) do
-    node_name = Keyword.fetch!(opts, :node_name)
-    host = Keyword.fetch!(opts, :host)
-    force = Keyword.get(opts, :force, false)
+    with {:ok, node_name} <- Keyword.fetch(opts, :node_name),
+         {:ok, host} <- Keyword.fetch(opts, :host) do
+      force = Keyword.get(opts, :force, false)
 
-    with {:ok, ca_cert_path} <- init_ca(output_dir, force: force),
-         {:ok, node_cert_path} <-
-           add_node(output_dir, node_name, host, output_dir: output_dir) do
-      node_key_path = Path.join(output_dir, "#{node_name}.key")
-      {:ok, %{ca_cert: ca_cert_path, node_cert: node_cert_path, node_key: node_key_path}}
+      with {:ok, ca_cert_path} <- init_ca(output_dir, force: force),
+           {:ok, node_cert_path} <-
+             add_node(output_dir, node_name, host, output_dir: output_dir) do
+        node_key_path = Path.join(output_dir, "#{node_name}.key")
+        {:ok, %{ca_cert: ca_cert_path, node_cert: node_cert_path, node_key: node_key_path}}
+      end
+    else
+      :error -> {:error, "missing required option: :node_name and :host are required"}
     end
   end
 
