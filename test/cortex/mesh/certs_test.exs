@@ -114,4 +114,76 @@ defmodule Cortex.Mesh.CertsTest do
       assert msg =~ "CA not found"
     end
   end
+
+  describe "init_mesh/2" do
+    test "creates CA and node cert in one call", %{dir: dir} do
+      assert {:ok, %{ca_cert: ca_cert, node_cert: node_cert, node_key: node_key}} =
+               Cortex.Mesh.Certs.init_mesh(dir, node_name: "mesh-node", host: "10.0.0.1")
+
+      assert File.exists?(ca_cert)
+      assert File.exists?(node_cert)
+      assert File.exists?(node_key)
+
+      # Verify node cert is signed by CA
+      {_output, 0} =
+        System.cmd("openssl", ["verify", "-CAfile", ca_cert, node_cert])
+    end
+
+    test "fails if already exists without force", %{dir: dir} do
+      {:ok, _} = Cortex.Mesh.Certs.init_mesh(dir, node_name: "n1", host: "10.0.0.1")
+
+      assert {:error, msg} = Cortex.Mesh.Certs.init_mesh(dir, node_name: "n1", host: "10.0.0.1")
+      assert msg =~ "already exists"
+    end
+
+    test "overwrites with force option", %{dir: dir} do
+      {:ok, _} = Cortex.Mesh.Certs.init_mesh(dir, node_name: "n1", host: "10.0.0.1")
+
+      assert {:ok, _} =
+               Cortex.Mesh.Certs.init_mesh(dir, node_name: "n1", host: "10.0.0.1", force: true)
+    end
+  end
+
+  describe "sign_csr/3" do
+    test "signs a valid CSR", %{dir: dir} do
+      {:ok, _} = Cortex.Mesh.Certs.init_ca(dir)
+
+      # Generate a CSR
+      key_path = Path.join(dir, "joiner.key")
+      csr_path = Path.join(dir, "joiner.csr")
+      {_, 0} = System.cmd("openssl", ["genrsa", "-out", key_path, "2048"], stderr_to_stdout: true)
+
+      {_, 0} =
+        System.cmd(
+          "openssl",
+          ["req", "-new", "-key", key_path, "-out", csr_path, "-subj", "/CN=joiner-node"],
+          stderr_to_stdout: true
+        )
+
+      csr_pem = File.read!(csr_path)
+
+      assert {:ok, cert_pem} =
+               Cortex.Mesh.Certs.sign_csr(csr_pem, dir, node_name: "joiner-node", host: "10.0.0.5")
+
+      assert cert_pem =~ "BEGIN CERTIFICATE"
+
+      # Verify the cert is signed by our CA
+      cert_tmp = Path.join(dir, "joiner_signed.crt")
+      File.write!(cert_tmp, cert_pem)
+
+      {_output, 0} =
+        System.cmd("openssl", ["verify", "-CAfile", Path.join(dir, "ca.crt"), cert_tmp])
+    end
+
+    test "rejects malformed CSR", %{dir: dir} do
+      {:ok, _} = Cortex.Mesh.Certs.init_ca(dir)
+
+      assert {:error, _} = Cortex.Mesh.Certs.sign_csr("not a valid CSR", dir)
+    end
+
+    test "fails without CA", %{dir: dir} do
+      assert {:error, msg} = Cortex.Mesh.Certs.sign_csr("whatever", dir)
+      assert msg =~ "CA not found"
+    end
+  end
 end

@@ -444,6 +444,33 @@ defmodule Cortex.Handler do
     end
   end
 
+  defp dispatch("mesh_invite", _params, _uid, _requesting_node) do
+    case Cortex.mesh_config() do
+      nil ->
+        {:error, "mesh networking not configured"}
+
+      config ->
+        case Cortex.Mesh.Pairing.add_secret() do
+          {:ok, secret} ->
+            node_cert_path = Keyword.fetch!(config, :node_cert)
+            tls_port = Keyword.get(config, :tls_port, 5528)
+            host = Keyword.get(config, :host, "127.0.0.1")
+
+            case Cortex.Mesh.JoinToken.cert_fingerprint(node_cert_path) do
+              {:ok, fingerprint} ->
+                token = Cortex.Mesh.JoinToken.encode(host, tls_port + 1, secret, fingerprint)
+                {:ok, token}
+
+              {:error, reason} ->
+                {:error, "failed to compute CA fingerprint: #{inspect(reason)}"}
+            end
+
+          {:error, reason} ->
+            {:error, "failed to generate secret: #{inspect(reason)}"}
+        end
+    end
+  end
+
   # Sync methods
 
   defp dispatch("sync_status", _params, _uid, _requesting_node) do
