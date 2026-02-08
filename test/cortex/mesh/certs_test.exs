@@ -186,7 +186,7 @@ defmodule Cortex.Mesh.CertsTest do
 
     test "fails without CA", %{dir: dir} do
       assert {:error, msg} = Cortex.Mesh.Certs.sign_csr("whatever", dir)
-      assert msg =~ "CA not found"
+      assert msg =~ "not found"
     end
   end
 end

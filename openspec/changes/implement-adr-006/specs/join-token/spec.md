@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Join token encoding
-The system SHALL encode join tokens in the format `cxm_<base64url(host:port:secret:cert_fingerprint)>` where:
+The system SHALL encode join tokens in the format `cxm_<base64url(host|port|secret|cert_fingerprint)>` (pipe-delimited to support IPv6 addresses) where:
 - `host` is the seed node's IP address or hostname
 - `port` is the TLS port (the pairing port is derived as tls_port + 1 by the joining client)
 - `secret` is a 32-byte cryptographically random value, hex-encoded (64 hex characters)
@@ -11,17 +11,17 @@ The `cxm_` prefix SHALL be present on all join tokens.
 
 #### Scenario: Encode a join token with an IP host
 - **WHEN** encoding a join token with host `158.69.220.39`, port `5529`, a 32-byte secret, and a cert fingerprint
-- **THEN** the result starts with `cxm_` followed by base64url encoding of `158.69.220.39:5529:<secret_hex>:<fingerprint_hex>`
+- **THEN** the result starts with `cxm_` followed by base64url encoding of `158.69.220.39|5529|<secret_hex>|<fingerprint_hex>`
 
 #### Scenario: Encode a join token with a hostname
 - **WHEN** encoding a join token with host `node1.example.com`, port `5529`, a 32-byte secret, and a cert fingerprint
-- **THEN** the result starts with `cxm_` followed by base64url encoding of `node1.example.com:5529:<secret_hex>:<fingerprint_hex>`
+- **THEN** the result starts with `cxm_` followed by base64url encoding of `node1.example.com|5529|<secret_hex>|<fingerprint_hex>`
 
 ### Requirement: Join token decoding
 The system SHALL decode a valid join token and return the host, port, secret, and certificate fingerprint as separate fields.
 
 #### Scenario: Decode a valid join token
-- **WHEN** decoding a token that starts with `cxm_` and contains valid base64url of a colon-delimited payload with 4 fields
+- **WHEN** decoding a token that starts with `cxm_` and contains valid base64url of a pipe-delimited payload with 4 fields
 - **THEN** the system returns `{:ok, %{host: host, port: port, secret: secret, cert_fingerprint: fingerprint}}`
 
 #### Scenario: Reject a token with wrong prefix
@@ -33,7 +33,7 @@ The system SHALL decode a valid join token and return the host, port, secret, an
 - **THEN** the system returns an error indicating invalid encoding
 
 #### Scenario: Reject a token with wrong field count
-- **WHEN** decoding a token whose base64url payload contains fewer or more than 4 colon-delimited fields
+- **WHEN** decoding a token whose base64url payload contains fewer or more than 4 pipe-delimited fields
 - **THEN** the system returns an error indicating invalid token format
 
 ### Requirement: Join token secret generation
@@ -51,7 +51,7 @@ The system SHALL compute the certificate fingerprint as the SHA-256 hash of the 
 - **THEN** the system decodes the PEM to DER, computes SHA-256 of the DER bytes, and returns the result as a lowercase hex string
 
 ### Requirement: Join tokens are distinct from identity claim tokens
-The `Cortex.Mesh.JoinToken` module SHALL be separate from `Cortex.Mesh.Token`. Join tokens use colon-delimited fields with a `cxm_` prefix. Identity claim tokens use signed JSON payloads with a `.` separator.
+The `Cortex.Mesh.JoinToken` module SHALL be separate from `Cortex.Mesh.Token`. Join tokens use pipe-delimited fields with a `cxm_` prefix (pipes chosen over colons to support IPv6 addresses). Identity claim tokens use signed JSON payloads with a `.` separator.
 
 #### Scenario: Module separation
 - **WHEN** the system encodes or decodes a join token

@@ -155,49 +155,54 @@ defmodule Cortex.Mesh.Certs do
     ca_key_path = Path.join(ca_dir, "ca.key")
     ca_cert_path = Path.join(ca_dir, "ca.crt")
 
-    unless File.exists?(ca_key_path) do
-      {:error, "CA not found at #{ca_dir}"}
-    else
-      node_name = Keyword.get(opts, :node_name)
-      host = Keyword.get(opts, :host)
+    cond do
+      not File.exists?(ca_key_path) ->
+        {:error, "CA key not found at #{ca_dir}"}
 
-      # Write CSR to temp file
-      tmp_dir = System.tmp_dir!()
-      tmp_id = :erlang.unique_integer([:positive])
-      csr_path = Path.join(tmp_dir, "pairing_#{tmp_id}.csr")
-      cert_path = Path.join(tmp_dir, "pairing_#{tmp_id}.crt")
-      ext_path = Path.join(tmp_dir, "pairing_#{tmp_id}.ext")
+      not File.exists?(ca_cert_path) ->
+        {:error, "CA certificate not found at #{ca_dir}"}
 
-      try do
-        with :ok <- File.write(csr_path, csr_pem),
-             :ok <- maybe_write_ext(ext_path, node_name, host),
-             :ok <-
-               run_openssl(
-                 [
-                   "x509",
-                   "-req",
-                   "-in",
-                   csr_path,
-                   "-CA",
-                   ca_cert_path,
-                   "-CAkey",
-                   ca_key_path,
-                   "-CAcreateserial",
-                   "-out",
-                   cert_path,
-                   "-days",
-                   to_string(@node_validity_days)
-                 ] ++
-                   if(File.exists?(ext_path), do: ["-extfile", ext_path], else: [])
-               ),
-             {:ok, cert_pem} <- File.read(cert_path) do
-          {:ok, cert_pem}
+      true ->
+        node_name = Keyword.get(opts, :node_name)
+        host = Keyword.get(opts, :host)
+
+        # Write CSR to temp file
+        tmp_dir = System.tmp_dir!()
+        tmp_id = :erlang.unique_integer([:positive])
+        csr_path = Path.join(tmp_dir, "pairing_#{tmp_id}.csr")
+        cert_path = Path.join(tmp_dir, "pairing_#{tmp_id}.crt")
+        ext_path = Path.join(tmp_dir, "pairing_#{tmp_id}.ext")
+
+        try do
+          with :ok <- File.write(csr_path, csr_pem),
+               :ok <- maybe_write_ext(ext_path, node_name, host),
+               :ok <-
+                 run_openssl(
+                   [
+                     "x509",
+                     "-req",
+                     "-in",
+                     csr_path,
+                     "-CA",
+                     ca_cert_path,
+                     "-CAkey",
+                     ca_key_path,
+                     "-CAcreateserial",
+                     "-out",
+                     cert_path,
+                     "-days",
+                     to_string(@node_validity_days)
+                   ] ++
+                     if(File.exists?(ext_path), do: ["-extfile", ext_path], else: [])
+                 ),
+               {:ok, cert_pem} <- File.read(cert_path) do
+            {:ok, cert_pem}
+          end
+        after
+          File.rm(csr_path)
+          File.rm(cert_path)
+          File.rm(ext_path)
         end
-      after
-        File.rm(csr_path)
-        File.rm(cert_path)
-        File.rm(ext_path)
-      end
     end
   end
 

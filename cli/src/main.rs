@@ -1003,7 +1003,15 @@ fn mesh_join(
             return ExitCode::FAILURE;
         }
     };
-    let pairing_port = tls_port + PAIRING_PORT_OFFSET;
+    let pairing_port = tls_port
+        .checked_add(PAIRING_PORT_OFFSET)
+        .unwrap_or_else(|| {
+            eprintln!(
+                "error: TLS port {} too high for pairing port offset",
+                tls_port
+            );
+            std::process::exit(1);
+        });
 
     let node_name = name.map(String::from).unwrap_or_else(default_node_name);
 
@@ -1103,7 +1111,13 @@ fn mesh_join(
         }
     };
 
-    let cert_der = peer_cert.to_der().unwrap_or_default();
+    let cert_der = match peer_cert.to_der() {
+        Ok(der) if !der.is_empty() => der,
+        _ => {
+            eprintln!("error: failed to encode peer certificate to DER");
+            return ExitCode::FAILURE;
+        }
+    };
     let fingerprint = format!("{:x}", Sha256::digest(&cert_der));
 
     if fingerprint != cert_fingerprint {
