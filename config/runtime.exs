@@ -1,5 +1,13 @@
 import Config
 
+# Set Mnesia data dir BEFORE application boot. Mnesia is in extra_applications
+# so it starts before Store.setup_mnesia runs — if the dir isn't set here,
+# Mnesia auto-starts with a default dir and ram_copies schema.
+if config_env() != :test do
+  data_dir = System.get_env("CORTEX_DATA_DIR", "/var/lib/cortex/mnesia")
+  config :mnesia, dir: String.to_charlist(data_dir)
+end
+
 # Mesh networking configuration from environment variables.
 # Written by `cortex mesh init` or `cortex mesh join` to /etc/cortex/mesh.env,
 # sourced by rel/env.sh.eex before the application starts.

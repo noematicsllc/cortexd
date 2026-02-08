@@ -25,9 +25,14 @@ if config_env() == :dev do
 end
 
 if config_env() == :test do
+  test_mnesia_dir = Path.expand("../tmp/test_mnesia", __DIR__)
+
   config :cortex,
     socket_path: Path.expand("../tmp/test_cortex.sock", __DIR__),
-    data_dir: Path.expand("../tmp/test_mnesia", __DIR__),
+    data_dir: test_mnesia_dir,
     replication_max_attempts: 2,
     replication_base_delay: 50
+
+  # Set Mnesia dir at config time so it's ready before Mnesia auto-starts
+  config :mnesia, dir: String.to_charlist(test_mnesia_dir)
 end

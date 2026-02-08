@@ -67,6 +67,20 @@ defmodule Cortex.Sync do
         Logger.warning("Mnesia change_config failed for #{new_node}: #{inspect(reason)}")
     end
 
+    # Ensure remote node has disc_copies schema — required for disc_copies
+    # table replication. The remote node may have started with ram_copies
+    # if Mnesia auto-started before its data dir was configured.
+    case :rpc.call(new_node, :mnesia, :change_table_copy_type, [:schema, new_node, :disc_copies]) do
+      {:atomic, :ok} ->
+        Logger.info("Upgraded schema to disc_copies on #{new_node}")
+
+      {:aborted, {:already_exists, :schema, _, :disc_copies}} ->
+        :ok
+
+      other ->
+        Logger.warning("Schema disc upgrade on #{new_node}: #{inspect(other)}")
+    end
+
     # Always replicate system tables
     for table <- @system_tables do
       setup_replication(table, new_node)
