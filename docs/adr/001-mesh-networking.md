@@ -179,7 +179,7 @@ Each node runs two listeners:
 {:local, "/run/cortex/cortex.sock"}
 
 # TCP + TLS (remote, mTLS auth)
-{:tcp, {0, 0, 0, 0}, 4711, [
+{:tcp, {0, 0, 0, 0}, 5528, [
   certfile: "certs/node.crt",
   keyfile: "certs/node.key",
   cacertfile: "certs/ca.crt",
@@ -391,9 +391,9 @@ Static configuration for v2 (simple and predictable):
 # config/runtime.exs
 config :cortex, :mesh,
   nodes: [
-    {"cortex-node-a", "192.168.1.10", 4711},
-    {"cortex-node-b", "192.168.1.11", 4711},
-    {"cortex-node-c", "home.example.com", 4711}
+    {"cortex-node-a", "192.168.1.10", 5528},
+    {"cortex-node-b", "192.168.1.11", 5528},
+    {"cortex-node-c", "home.example.com", 5528}
   ],
   ca_cert: "/etc/cortex/ca.crt",
   node_cert: "/etc/cortex/node.crt",

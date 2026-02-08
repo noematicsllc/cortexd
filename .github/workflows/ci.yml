@@ -31,10 +31,10 @@ jobs:
         run: mix deps.get
 
       - name: Compile
-        run: mix compile
+        run: mix compile --warnings-as-errors
 
       - name: Run tests
-        run: mix test --no-start
+        run: mix test
 
       - name: Check formatting
         run: mix format --check-formatted
@@ -69,7 +69,7 @@ jobs:
         run: cd cli && cargo build --release
 
       - name: Test version flag
-        run: ./cli/target/release/cortex-cli --version
+        run: ./cli/target/release/cortex --version
 
   build:
     name: Build Release

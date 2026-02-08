@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 use rmpv::Value;
+use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -12,7 +13,7 @@ static MSG_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Parser)]
 #[command(name = "cortex")]
-#[command(about = "CLI for Cortex local storage daemon")]
+#[command(about = "CLI for Cortex storage daemon")]
 #[command(version = VERSION)]
 #[command(disable_help_subcommand = true)]
 #[command(after_help = "Run 'cortex help <command>' for more information on a command.")]
@@ -106,6 +107,38 @@ enum Commands {
         command: AclCommands,
     },
 
+    /// Mesh networking commands
+    Mesh {
+        #[command(subcommand)]
+        command: MeshCommands,
+    },
+
+    /// Federated identity commands
+    Identity {
+        #[command(subcommand)]
+        command: IdentityCommands,
+    },
+
+    /// Get or set table node scope
+    Scope {
+        /// Table name
+        table: String,
+        /// New scope (local, all, or comma-separated node names). Omit to read current scope.
+        scope: Option<String>,
+    },
+
+    /// Show table metadata
+    Info {
+        /// Table name
+        table: String,
+    },
+
+    /// Data sync commands
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommands,
+    },
+
     /// Show help for a topic (e.g., cortex help memories)
     #[command(name = "help")]
     HelpTopic {
@@ -138,6 +171,79 @@ enum AclCommands {
 
     /// List ACLs for your tables
     List,
+}
+
+#[derive(Subcommand)]
+enum MeshCommands {
+    /// Initialize a new mesh Certificate Authority
+    InitCa {
+        /// Directory for CA files (default: ~/.cortex/mesh)
+        #[arg(long)]
+        dir: Option<String>,
+
+        /// Overwrite existing CA
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Add a node to the mesh (generate node certificate)
+    AddNode {
+        /// Node name (alphanumeric, hyphens, underscores)
+        name: String,
+        /// Node host (IP address or hostname)
+        host: String,
+
+        /// CA directory (default: ~/.cortex/mesh)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+
+    /// List configured mesh nodes
+    ListNodes,
+
+    /// Show mesh connectivity status
+    Status,
+}
+
+#[derive(Subcommand)]
+enum IdentityCommands {
+    /// Register a new federated identity
+    Register {
+        /// Identity name
+        name: String,
+    },
+
+    /// Claim a federated identity using a token
+    Claim {
+        /// Claim token from the registering node
+        token: String,
+    },
+
+    /// List all federated identities
+    List,
+
+    /// Revoke a federated identity
+    Revoke {
+        /// Identity name
+        name: String,
+        /// Specific node to revoke from (optional — revokes entirely if omitted)
+        node: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncCommands {
+    /// Show replication status
+    Status {
+        /// Specific table (omit for overview)
+        table: Option<String>,
+    },
+
+    /// Repair table replication
+    Repair {
+        /// Table to repair
+        table: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -252,6 +358,71 @@ fn main() -> ExitCode {
             ),
             AclCommands::List => call(&cli.socket, "acl_list", vec![]),
         },
+        Some(Commands::Mesh { command }) => match command {
+            MeshCommands::InitCa { dir, force } => {
+                return mesh_init_ca(dir.as_deref(), *force);
+            }
+            MeshCommands::AddNode { name, host, dir } => {
+                return mesh_add_node(name, host, dir.as_deref());
+            }
+            MeshCommands::ListNodes => call(&cli.socket, "mesh_list_nodes", vec![]),
+            MeshCommands::Status => call(&cli.socket, "mesh_status", vec![]),
+        },
+        Some(Commands::Identity { command }) => match command {
+            IdentityCommands::Register { name } => call(
+                &cli.socket,
+                "identity_register",
+                vec![Value::String(name.clone().into())],
+            ),
+            IdentityCommands::Claim { token } => call(
+                &cli.socket,
+                "identity_claim",
+                vec![Value::String(token.clone().into())],
+            ),
+            IdentityCommands::List => call(&cli.socket, "identity_list", vec![]),
+            IdentityCommands::Revoke { name, node } => {
+                let mut params = vec![Value::String(name.clone().into())];
+                if let Some(n) = node {
+                    params.push(Value::String(n.clone().into()));
+                }
+                call(&cli.socket, "identity_revoke", params)
+            }
+        },
+        Some(Commands::Scope { table, scope }) => match scope {
+            None => call(
+                &cli.socket,
+                "get_scope",
+                vec![Value::String(table.clone().into())],
+            ),
+            Some(s) => call(
+                &cli.socket,
+                "set_scope",
+                vec![
+                    Value::String(table.clone().into()),
+                    Value::String(s.clone().into()),
+                ],
+            ),
+        },
+        Some(Commands::Info { table }) => call(
+            &cli.socket,
+            "table_info",
+            vec![Value::String(table.clone().into())],
+        ),
+        Some(Commands::Sync { command }) => match command {
+            SyncCommands::Status { table } => match table {
+                None => call(&cli.socket, "sync_status", vec![]),
+                Some(t) => call(
+                    &cli.socket,
+                    "sync_status_table",
+                    vec![Value::String(t.clone().into())],
+                ),
+            },
+            SyncCommands::Repair { table } => call(
+                &cli.socket,
+                "sync_repair",
+                vec![Value::String(table.clone().into())],
+            ),
+        },
         Some(Commands::HelpTopic { topic }) => {
             print_topic_help(topic.as_deref());
             Ok(None)
@@ -275,6 +446,196 @@ fn main() -> ExitCode {
         }
     }
 }
+
+// --- Mesh certificate generation (local, no daemon needed) ---
+
+fn default_mesh_dir() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    format!("{}/.cortex/mesh", home)
+}
+
+fn run_openssl(args: &[&str]) -> Result<(), String> {
+    let output = Command::new("openssl").args(args).output().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "openssl is required for certificate generation".to_string()
+        } else {
+            format!("failed to run openssl: {}", e)
+        }
+    })?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("openssl failed: {}", stderr.trim()))
+    }
+}
+
+fn mesh_init_ca(dir: Option<&str>, force: bool) -> ExitCode {
+    let mesh_dir = dir.map(String::from).unwrap_or_else(default_mesh_dir);
+    let ca_key = format!("{}/ca.key", mesh_dir);
+    let ca_cert = format!("{}/ca.crt", mesh_dir);
+
+    if std::path::Path::new(&ca_key).exists() && !force {
+        eprintln!(
+            "error: CA already exists at {}. Use --force to overwrite.",
+            mesh_dir
+        );
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(e) = fs::create_dir_all(&mesh_dir) {
+        eprintln!("error: cannot create directory {}: {}", mesh_dir, e);
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(e) = run_openssl(&["genrsa", "-out", &ca_key, "4096"]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Set key permissions to 0600
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&ca_key, fs::Permissions::from_mode(0o600));
+    }
+
+    if let Err(e) = run_openssl(&[
+        "req",
+        "-new",
+        "-x509",
+        "-key",
+        &ca_key,
+        "-out",
+        &ca_cert,
+        "-days",
+        "3650",
+        "-subj",
+        "/CN=Cortex Mesh CA",
+    ]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    println!("CA created at {}", mesh_dir);
+    println!("  Key:  {}", ca_key);
+    println!("  Cert: {}", ca_cert);
+    ExitCode::SUCCESS
+}
+
+fn mesh_add_node(name: &str, host: &str, dir: Option<&str>) -> ExitCode {
+    // Validate node name
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        || name.is_empty()
+    {
+        eprintln!("error: invalid node name: must be alphanumeric with hyphens/underscores");
+        return ExitCode::FAILURE;
+    }
+
+    let mesh_dir = dir.map(String::from).unwrap_or_else(default_mesh_dir);
+    let ca_key = format!("{}/ca.key", mesh_dir);
+    let ca_cert = format!("{}/ca.crt", mesh_dir);
+    let nodes_dir = format!("{}/nodes", mesh_dir);
+
+    if !std::path::Path::new(&ca_key).exists() {
+        eprintln!(
+            "error: CA not found at {}. Run 'cortex mesh init-ca' first.",
+            mesh_dir
+        );
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(e) = fs::create_dir_all(&nodes_dir) {
+        eprintln!("error: cannot create directory {}: {}", nodes_dir, e);
+        return ExitCode::FAILURE;
+    }
+
+    let node_key = format!("{}/{}.key", nodes_dir, name);
+    let node_csr = format!("{}/{}.csr", nodes_dir, name);
+    let node_cert = format!("{}/{}.crt", nodes_dir, name);
+    let ext_file = format!("{}/{}.ext", nodes_dir, name);
+
+    // Build SAN entries
+    let san = if host.parse::<std::net::IpAddr>().is_ok() {
+        format!("DNS:{},IP:{}", name, host)
+    } else {
+        format!("DNS:{},DNS:{}", name, host)
+    };
+
+    let ext_content = format!(
+        "subjectAltName={}\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth,clientAuth\n",
+        san
+    );
+
+    // Generate node key
+    if let Err(e) = run_openssl(&["genrsa", "-out", &node_key, "2048"]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&node_key, fs::Permissions::from_mode(0o600));
+    }
+
+    // Generate CSR
+    if let Err(e) = run_openssl(&[
+        "req",
+        "-new",
+        "-key",
+        &node_key,
+        "-out",
+        &node_csr,
+        "-subj",
+        &format!("/CN={}", name),
+    ]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Write extension file
+    if let Err(e) = fs::write(&ext_file, &ext_content) {
+        eprintln!("error: cannot write extension file: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Sign with CA
+    if let Err(e) = run_openssl(&[
+        "x509",
+        "-req",
+        "-in",
+        &node_csr,
+        "-CA",
+        &ca_cert,
+        "-CAkey",
+        &ca_key,
+        "-CAcreateserial",
+        "-out",
+        &node_cert,
+        "-days",
+        "365",
+        "-extfile",
+        &ext_file,
+    ]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Clean up temp files
+    let _ = fs::remove_file(&node_csr);
+    let _ = fs::remove_file(&ext_file);
+
+    println!("Node '{}' added", name);
+    println!("  Key:  {}", node_key);
+    println!("  Cert: {}", node_cert);
+    ExitCode::SUCCESS
+}
+
+// --- RPC communication ---
 
 fn call(socket_path: &str, method: &str, params: Vec<Value>) -> Result<Option<Value>, String> {
     let mut stream = UnixStream::connect(socket_path)
@@ -321,6 +682,8 @@ fn call(socket_path: &str, method: &str, params: Vec<Value>) -> Result<Option<Va
         _ => Err("invalid response format".to_string()),
     }
 }
+
+// --- Value conversion ---
 
 fn json_to_msgpack(value: &serde_json::Value) -> Value {
     match value {
@@ -384,9 +747,11 @@ fn msgpack_to_json(value: &Value) -> serde_json::Value {
     }
 }
 
+// --- Help text ---
+
 fn print_help() {
     println!(
-        r#"cortex - Local storage daemon CLI
+        r#"cortex - Storage daemon CLI
 
 USAGE:
   cortex <command> [args] [--pretty]
@@ -409,6 +774,21 @@ COMMANDS:
   acl revoke IDENTITY TABLE PERMS   Revoke permissions
   acl list                          List ACLs for your tables
 
+  mesh init-ca                  Initialize mesh Certificate Authority
+  mesh add-node NAME HOST       Generate node certificate
+  mesh list-nodes               List configured mesh nodes
+  mesh status                   Show mesh connectivity
+
+  identity register NAME        Register a federated identity
+  identity claim TOKEN          Claim identity on this node
+  identity list                 List federated identities
+  identity revoke NAME [NODE]   Revoke a federated identity
+
+  scope TABLE [SCOPE]           Get or set table node scope
+  info TABLE                    Show table metadata
+  sync status [TABLE]           Show replication status
+  sync repair TABLE             Repair table replication
+
 OPTIONS:
   --pretty                      Pretty-print JSON output
   --socket PATH                 Socket path (default: /run/cortex/cortex.sock)
@@ -419,9 +799,9 @@ EXAMPLES:
   cortex create-table users id,name,email
   cortex put users '{{"id":"u1","name":"alice","email":"a@b.com"}}'
   cortex get users u1
-  cortex query users '{{"name":"alice"}}'
-  cortex acl grant 'uid:1001' users read
-  cortex acl grant '*' users read"#
+  cortex mesh init-ca
+  cortex mesh add-node my-node 192.168.1.10
+  cortex identity register alice"#
     );
 }
 
@@ -452,9 +832,6 @@ DESCRIPTION:
   Returns detailed status information about the Cortex daemon including
   version, uptime, and Mnesia database state.
 
-OPTIONS:
-  --pretty    Pretty-print the JSON output
-
 EXAMPLES:
   cortex status
   cortex status --pretty"#
@@ -466,8 +843,7 @@ USAGE:
   cortex tables [--pretty]
 
 DESCRIPTION:
-  Lists all tables owned by the current user (based on UID). Tables are
-  automatically namespaced by your UID internally.
+  Lists all tables owned by the current user (based on UID).
 
 EXAMPLES:
   cortex tables
@@ -480,12 +856,8 @@ USAGE:
   cortex create-table NAME ATTRS
 
 ARGUMENTS:
-  NAME    Table name (will be namespaced to your UID automatically)
-  ATTRS   Comma-separated attribute names; first attribute is the primary key
-
-DESCRIPTION:
-  Creates a new Mnesia table owned by you. The first attribute becomes
-  the primary key for get/delete operations.
+  NAME    Table name (namespaced to your UID automatically)
+  ATTRS   Comma-separated attribute names; first is the primary key
 
 EXAMPLES:
   cortex create-table users id,name,email
@@ -497,9 +869,7 @@ EXAMPLES:
 USAGE:
   cortex drop-table NAME
 
-DESCRIPTION:
-  Permanently deletes a table and all its data.
-  WARNING: This operation cannot be undone.
+WARNING: This operation cannot be undone.
 
 EXAMPLES:
   cortex drop-table old_sessions"#
@@ -509,9 +879,6 @@ EXAMPLES:
 
 USAGE:
   cortex get TABLE KEY [--pretty]
-
-DESCRIPTION:
-  Retrieves a single record by its primary key.
 
 EXAMPLES:
   cortex get users u1
@@ -523,10 +890,6 @@ EXAMPLES:
 USAGE:
   cortex put TABLE JSON
 
-DESCRIPTION:
-  Inserts a new record or updates an existing one. The JSON must contain
-  the primary key field defined when the table was created.
-
 EXAMPLES:
   cortex put users '{{"id":"u1","name":"alice","email":"a@b.com"}}'
   cortex put config '{{"key":"theme","value":"dark"}}'"#
@@ -537,12 +900,8 @@ EXAMPLES:
 USAGE:
   cortex delete TABLE KEY
 
-DESCRIPTION:
-  Permanently deletes a single record by its primary key.
-
 EXAMPLES:
-  cortex delete users u1
-  cortex delete sessions expired_session_123"#
+  cortex delete users u1"#
         ),
         Some("query") => println!(
             r#"cortex query - Query records by pattern
@@ -551,12 +910,10 @@ USAGE:
   cortex query TABLE PATTERN [--pretty]
 
 DESCRIPTION:
-  Finds all records matching the given pattern. The pattern is a JSON
-  object where each field must match exactly.
+  Finds all records matching the given JSON pattern.
 
 EXAMPLES:
-  cortex query users '{{"name":"alice"}}' --pretty
-  cortex query sessions '{{"user_id":"u1"}}'"#
+  cortex query users '{{"name":"alice"}}' --pretty"#
         ),
         Some("all") => println!(
             r#"cortex all - List all records in a table
@@ -564,12 +921,8 @@ EXAMPLES:
 USAGE:
   cortex all TABLE [--pretty]
 
-DESCRIPTION:
-  Returns all records in a table as a JSON array.
-
 EXAMPLES:
-  cortex all users --pretty
-  cortex all config"#
+  cortex all users --pretty"#
         ),
         Some("keys") => println!(
             r#"cortex keys - List all keys in a table
@@ -577,13 +930,8 @@ EXAMPLES:
 USAGE:
   cortex keys TABLE [--pretty]
 
-DESCRIPTION:
-  Returns all primary keys in a table as a JSON array. Useful for
-  debugging or iterating over records without fetching full data.
-
 EXAMPLES:
-  cortex keys users
-  cortex keys sessions --pretty"#
+  cortex keys users"#
         ),
         Some("acl") => println!(
             r#"cortex acl - Access control commands
@@ -608,8 +956,106 @@ PERMISSIONS:
 EXAMPLES:
   cortex acl grant 'uid:1001' users read
   cortex acl grant '*' public_data read
-  cortex acl revoke 'uid:1001' users write
   cortex acl list --pretty"#
+        ),
+        Some("mesh") => println!(
+            r#"cortex mesh - Mesh networking commands
+
+USAGE:
+  cortex mesh <subcommand> [args]
+
+SUBCOMMANDS:
+  init-ca                       Initialize mesh Certificate Authority
+  add-node NAME HOST            Generate certificate for a node
+  list-nodes                    List configured mesh nodes
+  status                        Show mesh connectivity status
+
+QUICK START:
+  1. cortex mesh init-ca
+  2. cortex mesh add-node my-node 192.168.1.10
+  3. Copy certs to node, configure mesh in config.exs
+  4. cortex mesh status
+
+OPTIONS:
+  --dir PATH    CA directory (default: ~/.cortex/mesh)
+  --force       Overwrite existing CA (init-ca only)
+
+EXAMPLES:
+  cortex mesh init-ca
+  cortex mesh init-ca --dir /etc/cortex/mesh
+  cortex mesh add-node node-a 10.0.0.1
+  cortex mesh list-nodes --pretty
+  cortex mesh status --pretty"#
+        ),
+        Some("identity") => println!(
+            r#"cortex identity - Federated identity commands
+
+USAGE:
+  cortex identity <subcommand> [args]
+
+SUBCOMMANDS:
+  register NAME         Register a new federated identity
+  claim TOKEN           Claim an identity on this node using a token
+  list                  List all federated identities
+  revoke NAME [NODE]    Revoke an identity (optionally from specific node)
+
+DESCRIPTION:
+  Federated identities link a user across multiple mesh nodes. Register
+  on your primary node, then claim on other nodes using the token.
+
+  Tables prefixed with @ use federated identity namespacing:
+    cortex create-table @memories id,content
+    → creates @alice:memories (if your federated identity is "alice")
+
+EXAMPLES:
+  cortex identity register alice
+  cortex identity claim <token-from-register>
+  cortex identity list --pretty
+  cortex identity revoke alice"#
+        ),
+        Some("scope") => println!(
+            r#"cortex scope - Get or set table node scope
+
+USAGE:
+  cortex scope TABLE              Get current scope
+  cortex scope TABLE SCOPE        Set scope
+
+SCOPE VALUES:
+  local                   Only accessible on this node (default)
+  all                     Accessible from all mesh nodes
+  node-a,node-b           Accessible from listed nodes only
+
+EXAMPLES:
+  cortex scope users
+  cortex scope users all
+  cortex scope users node-a,node-b"#
+        ),
+        Some("info") => println!(
+            r#"cortex info - Show table metadata
+
+USAGE:
+  cortex info TABLE [--pretty]
+
+DESCRIPTION:
+  Displays table owner, attributes, key field, node scope, and ACLs.
+
+EXAMPLES:
+  cortex info users --pretty"#
+        ),
+        Some("sync") => println!(
+            r#"cortex sync - Data replication commands
+
+USAGE:
+  cortex sync <subcommand> [args]
+
+SUBCOMMANDS:
+  status [TABLE]        Show replication status (all tables or specific)
+  repair TABLE          Repair table replication
+
+EXAMPLES:
+  cortex sync status --pretty
+  cortex sync status users
+  cortex sync repair users"#
         ),
         Some("patterns") => println!(
             r#"Cortex Usage Patterns
@@ -694,7 +1140,8 @@ FINDING YOUR UID:
             eprintln!();
             eprintln!("Available commands:");
             eprintln!("  ping, status, tables, create-table, drop-table,");
-            eprintln!("  get, put, delete, query, all, keys, acl");
+            eprintln!("  get, put, delete, query, all, keys, acl,");
+            eprintln!("  mesh, identity, scope, info, sync");
             eprintln!();
             eprintln!("Available patterns:");
             eprintln!("  patterns, memories, statemachine, identities");

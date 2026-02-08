@@ -81,7 +81,7 @@ jobs:
       - name: Package CLI
         run: |
           mkdir -p dist
-          cp cli/target/${{ matrix.rust-target }}/release/cortex-cli dist/cortex-${{ matrix.target }}
+          cp cli/target/${{ matrix.rust-target }}/release/cortex dist/cortex-${{ matrix.target }}
           chmod +x dist/cortex-${{ matrix.target }}
 
       - name: Upload artifacts
