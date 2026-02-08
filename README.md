@@ -104,8 +104,11 @@ cortex acl list                             # List all ACLs
 ### Mesh Networking
 
 ```bash
-cortex mesh init-ca                       # Initialize Certificate Authority
-cortex mesh add-node NAME HOST            # Generate node certificate
+cortex mesh init                          # Initialize mesh and print join token
+cortex mesh join TOKEN                    # Join an existing mesh
+cortex mesh invite                        # Generate join token for new nodes
+cortex mesh init-ca                       # Initialize CA (manual workflow)
+cortex mesh add-node NAME HOST            # Generate node cert (manual workflow)
 cortex mesh list-nodes                    # List configured mesh nodes
 cortex mesh status                        # Show mesh connectivity
 ```
@@ -168,36 +171,75 @@ Cortex nodes form a mesh network using mutual TLS (mTLS). Each node has a certif
 
 Remote connections identify as **nodes**, not users. A TLS connection from `node-b` has `uid=nil` and `requesting_node="node-b"`. Table access for remote nodes requires world-readable ACLs (`*`) and fully-qualified table names.
 
-### Certificate Setup
+### Quick Start (Token-Based)
 
-Generate a Certificate Authority and node certificates:
+Two commands to form a mesh — handles CA creation, certificates, configuration, and daemon restart automatically:
+
+```
+# On the first node:
+$ sudo cortex mesh init
+Initializing mesh...
+  Node name: node1
+  Host: 158.69.220.39
+  TLS port: 5528
+  Cert dir: /etc/cortex/mesh
+  Mesh config: /etc/cortex/mesh.env
+Restarting cortexd...
+
+Mesh initialized on 158.69.220.39:5528
+Join token: cxm_MTU4LjY5LjIyMC4zOTo1NTI4Omth...
+Share this token with other nodes to join the mesh.
+```
+
+```
+# On each additional node (copy-paste the token via any channel):
+$ sudo cortex mesh join cxm_MTU4LjY5LjIyMC4zOTo1NTI4Omth...
+Joining mesh...
+  Seed: 158.69.220.39:5528
+  Node name: node2
+  Connecting to 158.69.220.39:5529...
+  CA fingerprint verified.
+  Certificate signed by mesh CA.
+Restarting cortexd...
+  Mesh configured. Node name: node2
+Joined mesh. Connected peers: node1:158.69.220.39:5528
+```
+
+To add more nodes later, generate a new join token from any existing mesh node:
+
+```bash
+cortex mesh invite
+# → cxm_...
+```
+
+Both `mesh init` and `mesh join` write certificates to `/etc/cortex/mesh/` and generate `/etc/cortex/mesh.env` with the required environment variables. The daemon is restarted automatically.
+
+### Manual Workflow
+
+For advanced use cases (custom PKI, air-gapped environments, or when nodes can't reach each other during setup):
 
 ```bash
 # 1. Initialize the CA (once, on any machine)
 cortex mesh init-ca
-# Creates ~/.cortex/mesh/ca.key and ~/.cortex/mesh/ca.crt
 
 # 2. Generate node certificates
 cortex mesh add-node node-a 192.168.1.10
 cortex mesh add-node node-b 192.168.1.20
-```
 
-Directory structure after setup:
+# 3. Distribute certs to each node:
+#    ca.crt, {node}.key, {node}.crt → /etc/cortex/mesh/
 
-```
-~/.cortex/mesh/
-  ca.key              # CA private key (keep secure!)
-  ca.crt              # CA certificate (distribute to all nodes)
-  nodes/
-    node-a.key        # Node A private key
-    node-a.crt        # Node A certificate (CN=node-a, SAN=192.168.1.10)
-    node-b.key        # Node B private key
-    node-b.crt        # Node B certificate (CN=node-b, SAN=192.168.1.20)
+# 4. Configure each node via environment variables or config
+#    (see Environment Variables section below)
+
+# 5. Restart cortexd on each node
 ```
 
 ### Node Configuration
 
-In `config/config.exs`:
+`mesh init` and `mesh join` handle configuration automatically — they write `/etc/cortex/mesh.env` and restart the daemon. Manual configuration is only needed for the manual workflow.
+
+For release-mode deployment, set environment variables (see [Environment Variables](#environment-variables)). For development, use `config/config.exs`:
 
 ```elixir
 config :cortex, :mesh,
@@ -209,19 +251,6 @@ config :cortex, :mesh,
   nodes: [
     {"node-b", "192.168.1.20", 5528}
   ]
-```
-
-For release-mode deployment, use environment variables instead (see [Environment Variables](#environment-variables)).
-
-### Verify Connectivity
-
-```bash
-# On node-a
-cortex mesh status
-# Shows connection state to node-b
-
-cortex mesh list-nodes
-# Lists all configured peers
 ```
 
 ## Federated Identity

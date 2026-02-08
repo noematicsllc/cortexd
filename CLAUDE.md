@@ -23,7 +23,7 @@ Store learnings, decisions, and status updates back to cortex as you work. This 
 
 ## Project Overview
 
-Cortex is a local storage daemon providing an embedded Mnesia database accessible via Unix socket or CLI. Version 1 focuses on single-machine operation.
+Cortex is a storage daemon providing an embedded Mnesia database accessible via Unix socket (local) or mTLS mesh network (remote). Supports single-machine and multi-node deployments with token-based mesh join.
 
 **Core philosophy:** Infrastructure, not framework. Generic storage primitives with no opinions on schema or usage patterns.
 
@@ -64,6 +64,13 @@ App / CLI → Unix socket → cortexd → Mnesia
 - `lib/cortex/client.ex` - Client for CLI
 - `lib/cortex/cli.ex` - CLI interface
 - `c_src/peercred_nif.c` - Cross-platform peercred NIF (Linux + macOS)
+- `lib/cortex/tls_server.ex` - TLS listener for mesh connections
+- `lib/cortex/mesh/certs.ex` - Certificate generation (CA + node certs)
+- `lib/cortex/mesh/join_token.ex` - Join token encoding/decoding (`cxm_` prefix)
+- `lib/cortex/mesh/pairing.ex` - Pairing endpoint for mesh join protocol
+- `lib/cortex/mesh/manager.ex` - Mesh connectivity and node lifecycle
+- `lib/cortex/mesh/token.ex` - Claim tokens for federated identity
+- `lib/cortex/mesh/dist_config.ex` - Erlang distribution TLS configuration
 
 ### Security Model
 
@@ -89,7 +96,7 @@ MessagePack-RPC format:
 - Request: `[0, msgid, method, params]`
 - Response: `[1, msgid, error, result]`
 
-Methods: `ping`, `status`, `tables`, `create_table`, `drop_table`, `put`, `get`, `delete`, `match`, `all`, `acl_grant`, `acl_revoke`, `acl_list`
+Methods: `ping`, `status`, `tables`, `create_table`, `drop_table`, `put`, `get`, `delete`, `match`, `all`, `acl_grant`, `acl_revoke`, `acl_list`, `mesh_list_nodes`, `mesh_status`, `mesh_invite`, `identity_register`, `identity_claim`, `identity_list`, `identity_revoke`, `sync_status`, `sync_status_table`, `sync_repair`
 
 ## Data Model
 
@@ -120,10 +127,7 @@ See README.md for full examples.
 - **Data:** `/var/lib/cortex/mnesia/`
 - **Service:** `/etc/systemd/system/cortexd.service`
 
-## Future Work (v2+)
+## Implemented ADRs
 
-See `docs/adr/001-mesh-networking.md` for the mesh networking design:
-- TCP/remote access with mTLS
-- Federated identity (cross-node UID linking)
-- Node scope for replication control
-- Token authentication
+- **ADR-001** (`docs/adr/001-mesh-networking.md`) - Mesh networking: mTLS, federated identity, node scope, replication
+- **ADR-006** (`docs/adr/006-token-based-mesh-join.md`) - Token-based mesh join: `mesh init` / `mesh join` / `mesh invite`
