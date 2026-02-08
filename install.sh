@@ -5,7 +5,7 @@ set -e
 # Binary install:  curl -fsSL <url> | sudo bash
 # Source install:   sudo ./install.sh --from-source
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 REPO="noematicsllc/cortexd"
 INSTALL_DIR="/var/lib/cortex"
 BIN_DIR="/usr/local/bin"
