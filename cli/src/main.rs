@@ -784,6 +784,14 @@ fn write_mesh_env(cfg: &MeshEnvConfig, env_path: &str) -> Result<(), String> {
     fs::write(env_path, &content).map_err(|e| format!("cannot write {}: {}", env_path, e))
 }
 
+fn chown_mesh_dir(mesh_dir: &str) {
+    // The daemon runs as cortex:cortex but mesh init/join runs as root.
+    // Make cert files readable by the daemon.
+    let _ = Command::new("chown")
+        .args(["-R", "cortex:cortex", mesh_dir])
+        .output();
+}
+
 fn restart_daemon_and_wait(socket_path: &str) -> Result<(), String> {
     // Detect init system and restart accordingly
     let (cmd, args, log_hint): (&str, Vec<&str>, &str) =
@@ -918,7 +926,10 @@ fn mesh_init(
     }
     eprintln!("  Mesh config: {}", env_path);
 
-    // Step 4: Restart daemon
+    // Step 4: Fix ownership so cortex user can read certs
+    chown_mesh_dir(&mesh_dir);
+
+    // Step 5: Restart daemon
     eprintln!("Restarting cortexd...");
     if let Err(e) = restart_daemon_and_wait(socket_path) {
         eprintln!("error: {}", e);
@@ -1326,7 +1337,10 @@ fn mesh_join(
         return ExitCode::FAILURE;
     }
 
-    // Step 9: Restart daemon
+    // Step 9: Fix ownership so cortex user can read certs
+    chown_mesh_dir(&mesh_dir);
+
+    // Step 10: Restart daemon
     eprintln!("Restarting cortexd...");
     if let Err(e) = restart_daemon_and_wait(socket_path) {
         eprintln!("error: {}", e);
