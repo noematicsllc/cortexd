@@ -1,8 +1,8 @@
 # Cortex
 
-A local storage daemon providing an embedded Mnesia database accessible via Unix socket. UID-based authentication with per-table access control.
+A local storage daemon providing an embedded Mnesia database accessible via Unix socket or mesh network. UID-based authentication for local connections, mTLS for remote nodes, with per-table access control.
 
-**Current version: 0.1.0-beta**
+**Current version: 0.2.0**
 
 ## Features
 
@@ -10,37 +10,45 @@ A local storage daemon providing an embedded Mnesia database accessible via Unix
 - **Embedded storage** - Mnesia database with transactions and pattern matching
 - **UID-based auth** - Kernel-enforced identity via SO_PEERCRED (no tokens to steal)
 - **Per-table ACLs** - Read, write, admin permissions with world-readable option
+- **Mesh networking** - mTLS-secured node-to-node communication with certificate management
+- **Federated identity** - Cross-node identity registration and token-based claiming
 - **Cross-platform** - Linux (x86_64, ARM64) and macOS (Intel, Apple Silicon)
 
 ## Installation
 
-### Option 1: Pre-built Binaries (Recommended)
-
-One-line install (Linux/macOS):
+### Pre-built Binaries (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/noematicsllc/cortexd/main/install-binary.sh | sudo bash
+sudo ./install.sh
 ```
 
-This auto-detects your platform and installs both the daemon and CLI.
+This downloads pre-built binaries from GitHub releases for your architecture.
 
-To install a specific version:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/noematicsllc/cortexd/main/install-binary.sh | sudo CORTEX_VERSION=0.1.0-beta bash
-```
-
-Or download manually from [GitHub Releases](https://github.com/noematicsllc/cortexd/releases).
-
-### Option 2: Build from Source
+### Build from Source
 
 Requires Elixir 1.17+ and Rust (for CLI):
 
 ```bash
-git clone https://github.com/rynmrtn/cortexd.git
+git clone https://github.com/noematicsllc/cortexd.git
 cd cortexd
-sudo ./install.sh
+sudo ./install.sh --from-source
 sudo systemctl enable --now cortexd
+```
+
+## Quick Start
+
+```bash
+# Start the daemon
+sudo systemctl enable --now cortexd
+
+# Health check
+cortex ping
+cortex status
+
+# Create a table and store data
+cortex create-table users id,name,email
+cortex put users '{"id":"u1","name":"alice","email":"alice@example.com"}'
+cortex get users u1
 ```
 
 ## Uninstall
@@ -51,38 +59,85 @@ sudo ./uninstall.sh
 
 You'll be prompted whether to keep or delete your data.
 
-## Usage
+## Command Reference
+
+### Core Commands
 
 ```bash
-# Version and help
-cortex --version
-cortex --help
-cortex help memories    # Usage patterns documentation
+cortex ping                              # Health check
+cortex status                            # Daemon status
+cortex tables                            # List your tables
+```
 
-# Health check
-cortex ping
-cortex status
+### Table Operations
 
-# Tables
-cortex tables
-cortex create_table users id,name,email
-cortex drop_table users
+```bash
+cortex create-table NAME key,field1,field2  # Create table (first field = primary key)
+cortex drop-table NAME                      # Drop a table
+cortex info NAME                            # Show table metadata
+cortex scope NAME                           # Get table's node scope
+cortex scope NAME all                       # Set node scope (local, all, or node list)
+```
 
-# Records
-cortex put users '{"id":"u1","name":"alice","email":"alice@example.com"}'
-cortex get users u1
-cortex delete users u1
-cortex query users '{"name":"alice"}'
-cortex all users
+### Record Operations
 
-# Access control
-cortex acl grant uid:2001 users read,write
-cortex acl grant '*' public_data read    # World-readable
-cortex acl revoke uid:2001 users write
-cortex acl list
+```bash
+cortex put TABLE '{"key":"val",...}'      # Insert/update record
+cortex get TABLE key                      # Get by key
+cortex delete TABLE key                   # Delete record
+cortex query TABLE '{"field":"value"}'    # Pattern match
+cortex all TABLE                          # List all records
+cortex keys TABLE                         # List all keys
+```
+
+### Access Control
+
+```bash
+cortex acl grant uid:2001 TABLE read,write  # Grant permissions
+cortex acl grant '*' TABLE read             # World-readable
+cortex acl revoke uid:2001 TABLE write      # Revoke permissions
+cortex acl list                             # List all ACLs
+```
+
+### Mesh Networking
+
+```bash
+cortex mesh init-ca                       # Initialize Certificate Authority
+cortex mesh add-node NAME HOST            # Generate node certificate
+cortex mesh list-nodes                    # List configured mesh nodes
+cortex mesh status                        # Show mesh connectivity
+```
+
+### Federated Identity
+
+```bash
+cortex identity register NAME             # Register identity on this node
+cortex identity claim TOKEN               # Claim identity using a token
+cortex identity list                      # List all identities
+cortex identity revoke NAME               # Revoke identity on this node
+cortex identity revoke NAME NODE          # Revoke identity on specific node
+```
+
+### Sync & Replication
+
+```bash
+cortex sync status                        # Replication status overview
+cortex sync status TABLE                  # Table-specific sync status
+cortex sync repair TABLE                  # Repair table replication
+```
+
+### Help
+
+```bash
+cortex help                               # General help
+cortex help mesh                          # Mesh networking guide
+cortex help identity                      # Federated identity guide
+cortex help memories                      # Memory pattern guide
 ```
 
 ## Architecture
+
+### Single Node
 
 ```
 App / CLI --> Unix socket --> cortexd --> Mnesia
@@ -90,49 +145,131 @@ App / CLI --> Unix socket --> cortexd --> Mnesia
            SO_PEERCRED (kernel reports UID)
 ```
 
-Tables are namespaced by creator UID (`1000:users`). Users access their own tables without prefix; cross-user access requires the full identifier and appropriate ACL permissions.
+### Mesh Network
+
+```
+                      mTLS (port 5528)
+  cortexd (node-a) <==================> cortexd (node-b)
+       |                                     |
+   Unix socket                           Unix socket
+       |                                     |
+   CLI / Apps                            CLI / Apps
+```
+
+Tables are namespaced by creator UID (`1000:users`). Local users access their own tables without prefix; cross-user and remote access requires the full identifier (`1000:users`) and appropriate ACL permissions.
+
+## Mesh Networking
+
+### Overview
+
+Cortex nodes form a mesh network using mutual TLS (mTLS). Each node has a certificate signed by a shared CA. Nodes communicate over TCP with MessagePack-RPC, authenticated by their certificates.
+
+Remote connections identify as **nodes**, not users. A TLS connection from `node-b` has `uid=nil` and `requesting_node="node-b"`. Table access for remote nodes requires world-readable ACLs (`*`) and fully-qualified table names.
+
+### Certificate Setup
+
+Generate a Certificate Authority and node certificates:
+
+```bash
+# 1. Initialize the CA (once, on any machine)
+cortex mesh init-ca
+# Creates ~/.cortex/mesh/ca.key and ~/.cortex/mesh/ca.crt
+
+# 2. Generate node certificates
+cortex mesh add-node node-a 192.168.1.10
+cortex mesh add-node node-b 192.168.1.20
+```
+
+Directory structure after setup:
+
+```
+~/.cortex/mesh/
+  ca.key              # CA private key (keep secure!)
+  ca.crt              # CA certificate (distribute to all nodes)
+  nodes/
+    node-a.key        # Node A private key
+    node-a.crt        # Node A certificate (CN=node-a, SAN=192.168.1.10)
+    node-b.key        # Node B private key
+    node-b.crt        # Node B certificate (CN=node-b, SAN=192.168.1.20)
+```
+
+### Node Configuration
+
+In `config/config.exs`:
+
+```elixir
+config :cortex, :mesh,
+  node_name: "node-a",
+  tls_port: 5528,
+  ca_cert: "/etc/cortex/mesh/ca.crt",
+  node_cert: "/etc/cortex/mesh/nodes/node-a.crt",
+  node_key: "/etc/cortex/mesh/nodes/node-a.key",
+  nodes: [
+    {"node-b", "192.168.1.20", 5528}
+  ]
+```
+
+For release-mode deployment, use environment variables instead (see [Environment Variables](#environment-variables)).
+
+### Verify Connectivity
+
+```bash
+# On node-a
+cortex mesh status
+# Shows connection state to node-b
+
+cortex mesh list-nodes
+# Lists all configured peers
+```
+
+## Federated Identity
+
+Federated identity links a local UID on one node to a name that other nodes can reference. This enables cross-node table access without exposing raw UIDs.
+
+```bash
+# On node-a: register user alice (links UID 1001 to name "alice")
+cortex identity register alice
+
+# Share the claim token with node-b (out of band)
+# On node-b: claim the identity
+cortex identity claim <token>
+
+# Now node-b can reference alice's tables via federated name
+```
 
 ## Security Model
 
-- **Identity**: UID extracted via SO_PEERCRED/getpeereid (kernel-enforced, cannot be spoofed)
+- **Local identity**: UID extracted via SO_PEERCRED/getpeereid (kernel-enforced, cannot be spoofed)
+- **Remote identity**: mTLS certificate CN identifies the connecting node
 - **Namespacing**: Tables prefixed with creator UID internally
 - **Permissions**: Per-table ACLs (read, write, admin)
 - **World access**: Special `*` identity for public tables
-- **Root access**: UID 0 bypasses all ACL checks (for admin backup/recovery and agent auditing)
+- **Root access**: UID 0 bypasses all ACL checks (scoped to local machine only)
 - **Socket**: Mode 0666 (any local user can connect; security enforced by ACLs)
+
+## Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `CORTEX_MESH_NODE_NAME` | Node name (enables mesh mode) | `node-a` |
+| `CORTEX_MESH_HOST` | Host address for Erlang distribution | `192.168.1.10` |
+| `CORTEX_MESH_TLS_PORT` | TLS listener port | `5528` |
+| `CORTEX_MESH_CA_CERT` | Path to CA certificate | `/etc/cortex/mesh/ca.crt` |
+| `CORTEX_MESH_NODE_CERT` | Path to node certificate | `/etc/cortex/mesh/nodes/node-a.crt` |
+| `CORTEX_MESH_NODE_KEY` | Path to node private key | `/etc/cortex/mesh/nodes/node-a.key` |
+| `CORTEX_MESH_NODES` | Comma-separated peer list | `node-b:192.168.1.20:5528` |
+| `CORTEX_SOCKET_PATH` | Unix socket path | `/run/cortex/cortex.sock` |
+| `CORTEX_DATA_DIR` | Mnesia data directory | `/var/lib/cortex/mnesia` |
 
 ## Agent Deployment
 
 AI agents get isolated storage by running as separate Unix users. Each user's UID becomes their Cortex identity (kernel-enforced, cannot be spoofed).
 
-### With Claude Code Plugin (Recommended)
-
-Install the agent-identity plugin for easy agent management:
-
-```bash
-# Copy plugin to your project
-cp -r /path/to/cortexd/plugins/agent-identity .claude/plugins/
-
-# Run setup (creates sudoers config, shows next steps)
-.claude/plugins/agent-identity/setup.sh
-```
-
-Then use the slash commands:
-
-```
-/spawn-agent agent-myproject-coder "Implement the new feature"
-/list-agents
-```
-
-See `plugins/agent-identity/README.md` for full setup instructions.
-
-### Manual Setup
-
 ```bash
 # Create agent user
-sudo useradd -r -s /usr/sbin/nologin -G $(whoami) agent-coder
+sudo useradd -r -s /usr/sbin/nologin agent-coder
 
-# Run claude as agent (requires sudoers setup)
+# Run as agent
 sudo -u agent-coder claude -p "do agent stuff"
 ```
 
@@ -142,12 +279,10 @@ The agent's UID becomes its Cortex identity automatically.
 
 ### Agent Memory (Public + Private)
 
-A common pattern for AI agents: maintain both shared knowledge and private state.
-
 ```bash
 # Agent creates its memory tables
-cortex create_table private id,type,content,ts
-cortex create_table public id,type,content,ts
+cortex create-table private id,type,content,ts
+cortex create-table public id,type,content,ts
 
 # Make public memory world-readable
 cortex acl grant '*' public read
@@ -172,68 +307,6 @@ cortex put public '{"id":"fact-1","type":"fact","content":"Rust async functions 
 cortex query 2001:public '{"type":"fact"}'
 ```
 
-### State Machine + Commands
-
-Define workflows and discoverable command templates using Cortex primitives.
-
-```bash
-# Create schema tables
-cortex create_table sm_definitions id,states,transitions,initial
-cortex create_table sm_instances id,machine,state,data,updated
-cortex create_table commands id,scope,description,usage,example
-
-# Make commands discoverable
-cortex acl grant '*' commands read
-cortex acl grant '*' sm_definitions read
-```
-
-**Define a workflow:**
-
-```bash
-cortex put sm_definitions '{
-  "id": "order",
-  "states": ["pending", "paid", "shipped", "delivered", "cancelled"],
-  "transitions": {"pending":["paid","cancelled"],"paid":["shipped","cancelled"],"shipped":["delivered"]},
-  "initial": "pending"
-}'
-```
-
-**Create and advance instances:**
-
-```bash
-# Create instance
-cortex put sm_instances '{"id":"order-123","machine":"order","state":"pending","data":{},"updated":1706745600}'
-
-# Advance state
-cortex put sm_instances '{"id":"order-123","state":"paid","updated":1706746000}'
-
-# Query by state
-cortex query sm_instances '{"machine":"order","state":"pending"}'
-```
-
-**Document commands:**
-
-```bash
-cortex put commands '{
-  "id": "sm:new",
-  "scope": "sm",
-  "description": "Create a new state machine instance",
-  "usage": "sm:new <machine> <instance_id>",
-  "example": "cortex put sm_instances {\"id\":\"order-123\",\"machine\":\"order\",\"state\":\"pending\",...}"
-}'
-
-# Discover available commands
-cortex query commands '{"scope":"sm"}'
-```
-
-### Namespace Convention
-
-| Pattern | Example | Access |
-|---------|---------|--------|
-| `{agent}_private` | `coder_private` | Owner only |
-| `{agent}_public` | `coder_public` | Owner writes, world reads |
-| `shared_{topic}` | `shared_codebase` | Designated writers, world reads |
-
 ## Platform Support
 
 | Platform | Status | Notes |
@@ -254,82 +327,11 @@ mix test
 
 | Path | What it is |
 |------|------------|
-| `/usr/local/bin/cortex` | CLI tool (standalone Rust binary, ~800KB, no dependencies) |
+| `/usr/local/bin/cortex` | CLI tool (standalone Rust binary, ~900KB, no dependencies) |
 | `/var/lib/cortex/bin/` | The daemon (Elixir release with bundled Erlang runtime) |
 | `/var/lib/cortex/mnesia/` | Database storage - all your tables and data |
 | `/run/cortex/cortex.sock` | Unix socket - how the CLI talks to the daemon |
 | `/etc/systemd/system/cortexd.service` | systemd service file |
-
-**Users/Groups created:**
-- `cortex` system user and group - the daemon runs as this user for security isolation
-
-**What is Mnesia?**
-
-Mnesia is Erlang's built-in database. It's embedded (no separate server), supports transactions, and can persist to disk. Your data is stored in `/var/lib/cortex/mnesia/`.
-
-**What is an Elixir release?**
-
-A release bundles the Erlang runtime with the application. The daemon runs without needing Elixir installed - everything is in `/var/lib/cortex/bin/`.
-
-## Claude Code Integration
-
-### Plugin Installation
-
-Copy the agent-identity plugin to your project:
-
-```bash
-mkdir -p .claude/plugins
-cp -r /path/to/cortexd/plugins/agent-identity .claude/plugins/
-```
-
-This provides:
-- `/spawn-agent <user> "task"` - Run a task as an isolated agent
-- `/list-agents` - List agents and their public tables
-
-### CLAUDE.md Template
-
-Add this to your project's `CLAUDE.md`:
-
-~~~markdown
-## Cortex (Local Storage)
-
-Cortex provides persistent local storage via the `cortex` CLI.
-
-### Quick Reference
-
-```bash
-cortex tables                              # List your tables
-cortex create_table NAME key,field1,field2 # Create table (first field = primary key)
-cortex put TABLE '{"key":"k1",...}'        # Insert/update record
-cortex get TABLE k1                        # Get by key
-cortex query TABLE '{"field":"value"}'     # Pattern match
-cortex all TABLE                           # List all records
-cortex acl grant '*' TABLE read            # Make world-readable
-```
-
-### Memory Pattern
-
-```bash
-# Setup (once per agent)
-cortex create_table memories id,type,content,ts
-cortex create_table public id,type,content,ts
-cortex acl grant '*' public read
-
-# Store memories
-cortex put memories '{"id":"m1","type":"context","content":"...","ts":1234567890}'
-cortex put public '{"id":"p1","type":"fact","content":"...","ts":1234567890}'
-```
-
-Identity is automatic (Unix UID). Tables are namespaced per user.
-~~~
-
-## Future Work
-
-- TCP/remote access
-- Mesh networking / clustering
-- Certificates / mTLS
-- Token authentication
-- Backup/export commands
 
 ## License
 

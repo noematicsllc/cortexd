@@ -69,7 +69,7 @@ jobs:
         run: cd cli && cargo build --release
 
       - name: Test version flag
-        run: ./cli/target/release/cortex-cli --version
+        run: ./cli/target/release/cortex --version
 
   build:
     name: Build Release

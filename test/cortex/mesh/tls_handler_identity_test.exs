@@ -6,7 +6,7 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
 
   @moduletag :mesh
 
-  # Task 9.1: TLS handler remote identity resolution tests
+  # TLS handler identity tests (ADR-003: remote connections identify as nodes only)
 
   setup do
     dir =
@@ -39,83 +39,8 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
     {:ok, dir: dir, certs: certs, port: test_port}
   end
 
-  describe "5-element RPC on TLS" do
-    test "TLS + metadata with valid uid processes request with requesting_node", %{
-      certs: certs,
-      port: port
-    } do
-      {:ok, client} = MH.tls_connect(port, certs, :node_b)
-
-      # Send 5-element RPC with uid metadata
-      {:ok, result} =
-        MH.rpc_call_with_metadata(client, "ping", [], %{"uid" => 1000})
-
-      assert result == "pong"
-
-      :ssl.close(client)
-    end
-
-    test "TLS + metadata with valid uid can access tables with requesting_node set", %{
-      certs: certs,
-      port: port
-    } do
-      # Create a table owned by uid 1000 with :all scope (remotely accessible)
-      uid = 1000
-      table_name = "tls_id_test_#{:erlang.unique_integer([:positive])}"
-      {:ok, table_atom} = Store.create_table(uid, table_name, [:id, :value], node_scope: :all)
-
-      on_exit(fn ->
-        try do
-          :mnesia.delete_table(table_atom)
-        rescue
-          _ -> :ok
-        end
-      end)
-
-      {:ok, client} = MH.tls_connect(port, certs, :node_b)
-
-      # 5-element RPC: uid 1000 accessing their own table via TLS
-      {:ok, result} =
-        MH.rpc_call_with_metadata(client, "status", [], %{"uid" => uid})
-
-      assert result["status"] == "running"
-
-      :ssl.close(client)
-    end
-
-    test "TLS + metadata with invalid uid type is treated as nil uid", %{
-      certs: certs,
-      port: port
-    } do
-      {:ok, client} = MH.tls_connect(port, certs, :node_b)
-
-      # Send metadata with non-integer uid — should be treated as nil
-      {:ok, result} =
-        MH.rpc_call_with_metadata(client, "ping", [], %{"uid" => "not_a_number"})
-
-      assert result == "pong"
-
-      :ssl.close(client)
-    end
-
-    test "TLS + metadata with negative uid is treated as nil uid", %{
-      certs: certs,
-      port: port
-    } do
-      {:ok, client} = MH.tls_connect(port, certs, :node_b)
-
-      # Negative UID should be rejected
-      {:ok, result} =
-        MH.rpc_call_with_metadata(client, "ping", [], %{"uid" => -1})
-
-      assert result == "pong"
-
-      :ssl.close(client)
-    end
-  end
-
   describe "4-element RPC on TLS" do
-    test "TLS without metadata has uid=nil and requesting_node=node_id", %{
+    test "TLS connection has uid=nil and requesting_node=node_id", %{
       certs: certs,
       port: port
     } do
@@ -125,30 +50,20 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
       {:ok, result} = MH.rpc_call(client, "ping")
       assert result == "pong"
 
-      # Status still works (doesn't require uid)
+      # Status works (doesn't require uid)
       {:ok, status} = MH.rpc_call(client, "status")
       assert status["status"] == "running"
 
       :ssl.close(client)
     end
-  end
 
-  describe "Unix socket + 5-element RPC rejection" do
-    test "metadata on Unix socket is rejected (anti-spoofing)" do
-      # Use the canonical test socket path (config/test.exs sets this)
-      socket_path = Path.expand("../../../tmp/test_cortex.sock", __DIR__)
+    test "TLS connection can list identities", %{certs: certs, port: port} do
+      {:ok, client} = MH.tls_connect(port, certs, :node_b)
 
-      # Connect to the running Unix socket server
-      opts = [:binary, {:active, false}, {:packet, :raw}]
-      {:ok, socket} = :gen_tcp.connect({:local, socket_path}, 0, opts, 5_000)
+      {:ok, result} = MH.rpc_call(client, "identity_list")
+      assert is_list(result)
 
-      # Send a 5-element RPC with metadata via Unix socket
-      {:error, error_msg} =
-        MH.unix_rpc_call_with_metadata(socket, "ping", [], %{"uid" => 1000})
-
-      assert error_msg =~ "metadata not allowed on local connections"
-
-      :gen_tcp.close(socket)
+      :ssl.close(client)
     end
   end
 
@@ -170,23 +85,30 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
 
       {:ok, client} = MH.tls_connect(port, certs, :node_b)
 
-      # Remote request to a :local table should be denied
-      {:error, error_msg} =
-        MH.rpc_call_with_metadata(client, "get", [table_name, "key1"], %{"uid" => uid})
+      # Remote request to a :local table should be denied (uid=nil on TLS)
+      {:error, error_msg} = MH.rpc_call(client, "get", [table_name, "key1"])
 
-      assert error_msg =~ "access_denied"
+      assert error_msg =~ "access_denied" or error_msg =~ "not_found" or
+               error_msg =~ "table_does_not_exist"
 
       :ssl.close(client)
     end
 
-    test "TLS request to :all scope table is allowed", %{certs: certs, port: port} do
+    test "TLS request to :all scope world-readable table is allowed", %{
+      certs: certs,
+      port: port
+    } do
       uid = 50_000 + :erlang.unique_integer([:positive])
       table_name = "all_scope_test_#{:erlang.unique_integer([:positive])}"
 
       {:ok, table_atom} = Store.create_table(uid, table_name, [:id, :value], node_scope: :all)
 
-      # Put a record so get has something to find
+      # Grant world-read so TLS connections (uid=nil) can access
+      Store.acl_grant("*", table_atom, [:read])
       Store.put(table_atom, %{"id" => "key1", "value" => "hello"})
+
+      # TLS connections must use fully-qualified name (uid:name) since uid=nil
+      fq_name = "#{uid}:#{table_name}"
 
       on_exit(fn ->
         try do
@@ -198,9 +120,8 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
 
       {:ok, client} = MH.tls_connect(port, certs, :node_b)
 
-      # Remote request to an :all table should succeed
-      {:ok, result} =
-        MH.rpc_call_with_metadata(client, "get", [table_name, "key1"], %{"uid" => uid})
+      # Remote request using fully-qualified name to :all scope + world-readable table
+      {:ok, result} = MH.rpc_call(client, "get", [fq_name, "key1"])
 
       assert result["id"] == "key1"
       assert result["value"] == "hello"
@@ -208,7 +129,7 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
       :ssl.close(client)
     end
 
-    test "TLS request to named-node scope table with matching node succeeds", %{
+    test "TLS request to named-node scope world-readable table with matching node succeeds", %{
       certs: certs,
       port: port
     } do
@@ -219,7 +140,12 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
       {:ok, table_atom} =
         Store.create_table(uid, table_name, [:id, :value], node_scope: ["node-b"])
 
+      # Grant world-read so TLS connections (uid=nil) can access
+      Store.acl_grant("*", table_atom, [:read])
       Store.put(table_atom, %{"id" => "key1", "value" => "scoped"})
+
+      # TLS connections must use fully-qualified name
+      fq_name = "#{uid}:#{table_name}"
 
       on_exit(fn ->
         try do
@@ -231,8 +157,7 @@ defmodule Cortex.Mesh.TLSHandlerIdentityTest do
 
       {:ok, client} = MH.tls_connect(port, certs, :node_b)
 
-      {:ok, result} =
-        MH.rpc_call_with_metadata(client, "get", [table_name, "key1"], %{"uid" => uid})
+      {:ok, result} = MH.rpc_call(client, "get", [fq_name, "key1"])
 
       assert result["value"] == "scoped"
 

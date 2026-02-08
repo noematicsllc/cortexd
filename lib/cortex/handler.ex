@@ -129,27 +129,6 @@ defmodule Cortex.Handler do
     end
   end
 
-  # 5-element RPC: [0, msgid, method, params, metadata]
-  defp handle_message([0, msgid, _method, _params, metadata], %{transport: :unix})
-       when is_map(metadata) do
-    # Metadata not allowed on local Unix connections (anti-spoofing)
-    Protocol.encode_error(msgid, "metadata not allowed on local connections")
-  end
-
-  defp handle_message([0, msgid, method, params, metadata], %{transport: :tls} = state)
-       when is_map(metadata) do
-    remote_uid = extract_remote_uid(metadata)
-    resolved_uid = resolve_remote_identity(state.node_id, remote_uid)
-    requesting_node = state.node_id
-    result = dispatch(method, params, resolved_uid, requesting_node)
-
-    case result do
-      {:ok, value} -> Protocol.encode_response(msgid, value)
-      {:error, reason} -> Protocol.encode_error(msgid, reason)
-      :ok -> Protocol.encode_response(msgid, "ok")
-    end
-  end
-
   # 4-element RPC: [0, msgid, method, params]
   defp handle_message([0, msgid, method, params], state) do
     uid = state.uid
@@ -166,16 +145,6 @@ defmodule Cortex.Handler do
   defp handle_message(_invalid, _state) do
     Protocol.encode_error(0, :invalid_request)
   end
-
-  # Extract remote UID from RPC metadata, validating it's a non-negative integer
-  defp extract_remote_uid(%{"uid" => uid}) when is_integer(uid) and uid >= 0, do: uid
-  defp extract_remote_uid(_), do: nil
-
-  # Resolve a (node_id, remote_uid) pair. The remote UID is passed through
-  # directly — federated identity resolution happens at the Store layer
-  # (resolve_table) using the requesting_node. This keeps dispatch simple.
-  defp resolve_remote_identity(_node_id, nil), do: nil
-  defp resolve_remote_identity(_node_id, remote_uid), do: remote_uid
 
   # Dispatch methods
 

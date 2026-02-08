@@ -44,6 +44,17 @@ defmodule Cortex.Store do
       {:error, {:already_started, :mnesia}} -> :ok
     end
 
+    # Ensure schema is persisted to disc on named nodes.
+    # If Mnesia was already started by the release boot, create_schema
+    # above fails and the schema stays ram_copies. This upgrades it.
+    if node() != :nonode@nohost do
+      case :mnesia.change_table_copy_type(:schema, node(), :disc_copies) do
+        {:atomic, :ok} -> Logger.info("Mnesia schema upgraded to disc_copies")
+        {:aborted, {:already_exists, :schema, _, :disc_copies}} -> :ok
+        {:aborted, reason} -> Logger.warning("Schema disc upgrade: #{inspect(reason)}")
+      end
+    end
+
     # System tables
     create_system_table(@acl_table, [:identity_table, :permissions])
     create_system_table(@meta_table, [:table_name, :owner, :key_field, :attributes, :node_scope])

@@ -1,6 +1,6 @@
 [package]
-name = "cortex-cli"
-version = "0.1.0-beta"
+name = "cortex"
+version = "0.2.0"
 edition = "2021"
 description = "CLI for Cortex local storage daemon"
 license = "MIT"
