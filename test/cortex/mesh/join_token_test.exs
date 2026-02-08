@@ -41,18 +41,39 @@ defmodule Cortex.Mesh.JoinTokenTest do
     end
 
     test "rejects token with wrong field count (too few)" do
-      payload = Base.url_encode64("host:5529", padding: false)
+      payload = Base.url_encode64("host|5529", padding: false)
       assert {:error, "invalid join token format" <> _} = JoinToken.decode("cxm_" <> payload)
     end
 
     test "rejects token with wrong field count (too many)" do
-      payload = Base.url_encode64("host:5529:secret:fp:extra", padding: false)
+      payload = Base.url_encode64("host|5529|secret|fp|extra", padding: false)
       assert {:error, "invalid join token format" <> _} = JoinToken.decode("cxm_" <> payload)
     end
 
     test "rejects token with non-integer port" do
-      payload = Base.url_encode64("host:notaport:secret:fp", padding: false)
+      payload = Base.url_encode64("host|notaport|secret|fp", padding: false)
       assert {:error, "invalid port in join token"} = JoinToken.decode("cxm_" <> payload)
+    end
+
+    test "round-trip with IPv6 address" do
+      secret = JoinToken.generate_secret()
+      fingerprint = String.duplicate("ef", 32)
+      token = JoinToken.encode("2001:db8::1", 5528, secret, fingerprint)
+
+      assert {:ok, decoded} = JoinToken.decode(token)
+      assert decoded.host == "2001:db8::1"
+      assert decoded.port == 5528
+      assert decoded.secret == secret
+      assert decoded.cert_fingerprint == fingerprint
+    end
+
+    test "round-trip with IPv6 loopback" do
+      secret = JoinToken.generate_secret()
+      fingerprint = String.duplicate("ab", 32)
+      token = JoinToken.encode("::1", 5528, secret, fingerprint)
+
+      assert {:ok, decoded} = JoinToken.decode(token)
+      assert decoded.host == "::1"
     end
   end
 

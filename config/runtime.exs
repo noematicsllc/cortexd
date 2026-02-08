@@ -6,8 +6,10 @@ import Config
 
 if node_name = System.get_env("CORTEX_MESH_NODE_NAME") do
   tls_port =
-    System.get_env("CORTEX_MESH_TLS_PORT", "5528")
-    |> String.to_integer()
+    case Integer.parse(System.get_env("CORTEX_MESH_TLS_PORT", "5528")) do
+      {port, ""} -> port
+      _ -> raise "Invalid CORTEX_MESH_TLS_PORT: must be an integer"
+    end
 
   ca_cert = System.get_env("CORTEX_MESH_CA_CERT", "/etc/cortex/mesh/ca.crt")
   node_cert = System.get_env("CORTEX_MESH_NODE_CERT")
@@ -25,8 +27,14 @@ if node_name = System.get_env("CORTEX_MESH_NODE_NAME") do
         |> String.split(",", trim: true)
         |> Enum.map(fn entry ->
           case String.split(entry, ":") do
-            [name, host, port] -> {name, host, String.to_integer(port)}
-            _ -> nil
+            [name, host, port_str] ->
+              case Integer.parse(port_str) do
+                {port, ""} -> {name, host, port}
+                _ -> nil
+              end
+
+            _ ->
+              nil
           end
         end)
         |> Enum.reject(&is_nil/1)

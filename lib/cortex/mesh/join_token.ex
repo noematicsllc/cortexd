@@ -2,7 +2,8 @@ defmodule Cortex.Mesh.JoinToken do
   @moduledoc """
   Join tokens for mesh pairing.
 
-  Encodes/decodes join tokens in the format `cxm_<base64url(host:port:secret:cert_fingerprint)>`.
+  Encodes/decodes join tokens in the format `cxm_<base64url(host|port|secret|cert_fingerprint)>`.
+  Uses `|` as the delimiter to support IPv6 addresses which contain colons.
   These are distinct from identity claim tokens in `Cortex.Mesh.Token`.
   """
 
@@ -10,10 +11,10 @@ defmodule Cortex.Mesh.JoinToken do
 
   @doc """
   Encode a join token from its components.
-  Returns a string like `cxm_<base64url(host:port:secret:cert_fingerprint)>`.
+  Returns a string like `cxm_<base64url(host|port|secret|cert_fingerprint)>`.
   """
   def encode(host, port, secret, cert_fingerprint) do
-    payload = "#{host}:#{port}:#{secret}:#{cert_fingerprint}"
+    payload = "#{host}|#{port}|#{secret}|#{cert_fingerprint}"
     @prefix <> Base.url_encode64(payload, padding: false)
   end
 
@@ -24,7 +25,7 @@ defmodule Cortex.Mesh.JoinToken do
   def decode(@prefix <> encoded) do
     case Base.url_decode64(encoded, padding: false) do
       {:ok, payload} ->
-        case String.split(payload, ":") do
+        case String.split(payload, "|") do
           [host, port_str, secret, cert_fingerprint] ->
             case Integer.parse(port_str) do
               {port, ""} ->
@@ -36,7 +37,7 @@ defmodule Cortex.Mesh.JoinToken do
             end
 
           _ ->
-            {:error, "invalid join token format: expected 4 colon-delimited fields"}
+            {:error, "invalid join token format: expected 4 pipe-delimited fields"}
         end
 
       :error ->
@@ -60,9 +61,12 @@ defmodule Cortex.Mesh.JoinToken do
   def cert_fingerprint(cert_path) do
     with {:ok, pem} <- File.read(cert_path) do
       case :public_key.pem_decode(pem) do
-        [{:Certificate, der, :not_encrypted}] ->
+        [{:Certificate, der, :not_encrypted} | _rest] ->
           hash = :crypto.hash(:sha256, der)
           {:ok, Base.encode16(hash, case: :lower)}
+
+        [] ->
+          {:error, "no certificate found in PEM file"}
 
         _ ->
           {:error, "invalid PEM certificate"}

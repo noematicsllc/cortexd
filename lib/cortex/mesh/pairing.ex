@@ -103,10 +103,25 @@ defmodule Cortex.Mesh.Pairing do
   end
 
   @impl true
+  def handle_cast({:add_peer, node_name, peer_host}, state) do
+    tls_port = Keyword.get(state.config, :tls_port, Cortex.default_tls_port())
+    existing_nodes = Keyword.get(state.config, :nodes, [])
+
+    unless Enum.any?(existing_nodes, fn {name, _, _} -> name == node_name end) do
+      updated_nodes = existing_nodes ++ [{node_name, peer_host, tls_port}]
+      updated_config = Keyword.put(state.config, :nodes, updated_nodes)
+      Application.put_env(:cortex, :mesh, updated_config)
+    end
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(:accept, state) do
     case :ssl.transport_accept(state.socket, 100) do
       {:ok, transport_socket} ->
-        spawn(fn -> complete_pairing_handshake(transport_socket, state) end)
+        handler_ctx = Map.take(state, [:config, :ca_dir])
+        spawn(fn -> complete_pairing_handshake(transport_socket, handler_ctx) end)
         send(self(), :accept)
         {:noreply, state}
 
@@ -182,7 +197,8 @@ defmodule Cortex.Mesh.Pairing do
             :ssl.close(ssl_socket)
 
             # Add the new node to the seed's mesh peer list
-            add_peer_to_config(node_name, state.config)
+            peer_host = peer_host_from_socket(ssl_socket)
+            GenServer.cast(__MODULE__, {:add_peer, node_name, peer_host})
 
             Logger.info("Paired node: #{node_name}")
 
@@ -217,15 +233,10 @@ defmodule Cortex.Mesh.Pairing do
     Keyword.get(config, :host, "127.0.0.1")
   end
 
-  defp add_peer_to_config(node_name, config) do
-    tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
-    existing_nodes = Keyword.get(config, :nodes, [])
-
-    # Don't add if a peer with this name already exists
-    unless Enum.any?(existing_nodes, fn {name, _, _} -> name == node_name end) do
-      updated_nodes = existing_nodes ++ [{node_name, node_name, tls_port}]
-      updated_config = Keyword.put(config, :nodes, updated_nodes)
-      Application.put_env(:cortex, :mesh, updated_config)
+  defp peer_host_from_socket(ssl_socket) do
+    case :ssl.peername(ssl_socket) do
+      {:ok, {ip, _port}} -> :inet.ntoa(ip) |> to_string()
+      _ -> "unknown"
     end
   end
 end

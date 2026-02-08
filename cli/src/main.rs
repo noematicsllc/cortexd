@@ -762,11 +762,12 @@ fn write_mesh_env(
     node_cert: &str,
     node_key: &str,
     peers: &str,
+    host: &str,
     env_path: &str,
 ) -> Result<(), String> {
     let content = format!(
         "CORTEX_MESH_NODE_NAME={}\nCORTEX_MESH_TLS_PORT={}\nCORTEX_MESH_CA_CERT={}\nCORTEX_MESH_NODE_CERT={}\nCORTEX_MESH_NODE_KEY={}\nCORTEX_MESH_NODES={}\nCORTEX_MESH_HOST={}\n",
-        node_name, tls_port, ca_cert, node_cert, node_key, peers, ""
+        node_name, tls_port, ca_cert, node_cert, node_key, peers, host
     );
 
     fs::write(env_path, &content).map_err(|e| format!("cannot write {}: {}", env_path, e))
@@ -868,7 +869,7 @@ fn mesh_init(
     // Step 3: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
     if let Err(e) = write_mesh_env(
-        &node_name, port, &ca_cert, &node_cert, &node_key, "", env_path,
+        &node_name, port, &ca_cert, &node_cert, &node_key, "", &host_str, env_path,
     ) {
         eprintln!("error: {}", e);
         return ExitCode::FAILURE;
@@ -916,9 +917,9 @@ fn decode_join_token(token: &str) -> Result<(String, u16, String, String), Strin
     let payload = String::from_utf8(payload_bytes)
         .map_err(|_| "invalid join token: not valid UTF-8".to_string())?;
 
-    let parts: Vec<&str> = payload.split(':').collect();
+    let parts: Vec<&str> = payload.split('|').collect();
     if parts.len() != 4 {
-        return Err("invalid join token: expected 4 colon-delimited fields".to_string());
+        return Err("invalid join token: expected 4 pipe-delimited fields".to_string());
     }
 
     let host = parts[0].to_string();
@@ -1088,21 +1089,25 @@ fn mesh_join(
         return ExitCode::FAILURE;
     }
 
-    // Step 6: Read response
-    let mut response_buf = vec![0u8; 65536];
-    let n = match tls_stream.read(&mut response_buf) {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("error: failed to read pairing response: {}", e);
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let response = match rmpv::decode::read_value(&mut &response_buf[..n]) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("error: failed to decode response: {}", e);
-            return ExitCode::FAILURE;
+    // Step 6: Read response (loop until full MessagePack value is received)
+    let mut response_buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let response = loop {
+        let n = match tls_stream.read(&mut chunk) {
+            Ok(0) => {
+                eprintln!("error: connection closed before full response received");
+                return ExitCode::FAILURE;
+            }
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("error: failed to read pairing response: {}", e);
+                return ExitCode::FAILURE;
+            }
+        };
+        response_buf.extend_from_slice(&chunk[..n]);
+        match rmpv::decode::read_value(&mut &response_buf[..]) {
+            Ok(v) => break v,
+            Err(_) => continue,
         }
     };
 
@@ -1223,6 +1228,9 @@ fn mesh_join(
         .and_then(|p| p.parse().ok())
         .unwrap_or(DEFAULT_TLS_PORT);
 
+    // Detect this node's host IP
+    let join_host = detect_host_ip().unwrap_or_else(|_| "127.0.0.1".to_string());
+
     // Step 8: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
     if let Err(e) = write_mesh_env(
@@ -1232,6 +1240,7 @@ fn mesh_join(
         &node_cert_path,
         &node_key,
         &peers_str,
+        &join_host,
         env_path,
     ) {
         eprintln!("error: {}", e);
