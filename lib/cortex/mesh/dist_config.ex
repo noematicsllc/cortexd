@@ -11,9 +11,9 @@ defmodule Cortex.Mesh.DistConfig do
   Generate the inet_tls.conf content for Erlang distribution over TLS.
   """
   def generate_config(mesh_config) do
-    ca_cert = Keyword.fetch!(mesh_config, :ca_cert)
-    node_cert = Keyword.fetch!(mesh_config, :node_cert)
-    node_key = Keyword.fetch!(mesh_config, :node_key)
+    ca_cert = Keyword.fetch!(mesh_config, :ca_cert) |> escape_path()
+    node_cert = Keyword.fetch!(mesh_config, :node_cert) |> escape_path()
+    node_key = Keyword.fetch!(mesh_config, :node_key) |> escape_path()
 
     """
     [{server, [
@@ -32,6 +32,12 @@ defmodule Cortex.Mesh.DistConfig do
       {secure_renegotiate, true}
     ]}].
     """
+  end
+
+  defp escape_path(path) do
+    path
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
   end
 
   @doc """

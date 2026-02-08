@@ -109,8 +109,16 @@ defmodule Cortex.TestHelpers.Mesh do
 
     case :ssl.recv(ssl_socket, 0, 5_000) do
       {:ok, data} ->
-        {:ok, [1, ^msgid, error, result]} = Msgpax.unpack(data)
-        if error, do: {:error, error}, else: {:ok, result}
+        case Msgpax.unpack(data) do
+          {:ok, [1, ^msgid, error, result]} ->
+            if error, do: {:error, error}, else: {:ok, result}
+
+          {:ok, unexpected} ->
+            {:error, {:unexpected_response, unexpected}}
+
+          {:error, reason} ->
+            {:error, {:unpack_error, reason}}
+        end
 
       {:error, reason} ->
         {:error, reason}

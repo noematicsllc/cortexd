@@ -3,6 +3,7 @@ defmodule Cortex.Mesh.CertsTest do
   import Bitwise
 
   @moduletag :mesh
+  @moduletag :openssl
 
   setup do
     dir = Path.join(System.tmp_dir!(), "cortex_certs_test_#{:erlang.unique_integer([:positive])}")

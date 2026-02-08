@@ -1,2 +1,5 @@
 :ssl.start()
-ExUnit.start(exclude: [:integration])
+
+exclude = [:integration]
+exclude = if System.find_executable("openssl"), do: exclude, else: [:openssl | exclude]
+ExUnit.start(exclude: exclude)

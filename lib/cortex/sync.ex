@@ -80,9 +80,19 @@ defmodule Cortex.Sync do
 
   @doc """
   Called when a node leaves the mesh.
+
+  Mnesia automatically handles the departed node's table copies becoming
+  unavailable. No explicit cleanup is needed — stale copies are removed
+  when the node rejoins and re-syncs via on_node_join/1, or via repair/1.
   """
   def on_node_leave(node) do
     Logger.info("Node left mesh: #{inspect(node)}")
+
+    # Remove departed node's table copies so Mnesia doesn't wait for it
+    for table <- @system_tables ++ all_user_tables() do
+      remove_replica(table, node)
+    end
+
     :ok
   end
 
