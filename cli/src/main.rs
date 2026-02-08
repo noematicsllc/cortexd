@@ -755,19 +755,20 @@ fn detect_host_ip() -> Result<String, String> {
     }
 }
 
-fn write_mesh_env(
-    node_name: &str,
+struct MeshEnvConfig<'a> {
+    node_name: &'a str,
     tls_port: u16,
-    ca_cert: &str,
-    node_cert: &str,
-    node_key: &str,
-    peers: &str,
-    host: &str,
-    env_path: &str,
-) -> Result<(), String> {
+    ca_cert: &'a str,
+    node_cert: &'a str,
+    node_key: &'a str,
+    peers: &'a str,
+    host: &'a str,
+}
+
+fn write_mesh_env(cfg: &MeshEnvConfig, env_path: &str) -> Result<(), String> {
     let content = format!(
         "CORTEX_MESH_NODE_NAME={}\nCORTEX_MESH_TLS_PORT={}\nCORTEX_MESH_CA_CERT={}\nCORTEX_MESH_NODE_CERT={}\nCORTEX_MESH_NODE_KEY={}\nCORTEX_MESH_NODES={}\nCORTEX_MESH_HOST={}\n",
-        node_name, tls_port, ca_cert, node_cert, node_key, peers, host
+        cfg.node_name, cfg.tls_port, cfg.ca_cert, cfg.node_cert, cfg.node_key, cfg.peers, cfg.host
     );
 
     fs::write(env_path, &content).map_err(|e| format!("cannot write {}: {}", env_path, e))
@@ -869,7 +870,16 @@ fn mesh_init(
     // Step 3: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
     if let Err(e) = write_mesh_env(
-        &node_name, port, &ca_cert, &node_cert, &node_key, "", &host_str, env_path,
+        &MeshEnvConfig {
+            node_name: &node_name,
+            tls_port: port,
+            ca_cert: &ca_cert,
+            node_cert: &node_cert,
+            node_key: &node_key,
+            peers: "",
+            host: &host_str,
+        },
+        env_path,
     ) {
         eprintln!("error: {}", e);
         return ExitCode::FAILURE;
@@ -1234,13 +1244,15 @@ fn mesh_join(
     // Step 8: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;
     if let Err(e) = write_mesh_env(
-        &node_name,
-        tls_port,
-        &ca_cert_path,
-        &node_cert_path,
-        &node_key,
-        &peers_str,
-        &join_host,
+        &MeshEnvConfig {
+            node_name: &node_name,
+            tls_port,
+            ca_cert: &ca_cert_path,
+            node_cert: &node_cert_path,
+            node_key: &node_key,
+            peers: &peers_str,
+            host: &join_host,
+        },
         env_path,
     ) {
         eprintln!("error: {}", e);
