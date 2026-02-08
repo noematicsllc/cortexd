@@ -456,17 +456,22 @@ defmodule Cortex.Handler do
       config ->
         case Cortex.Mesh.Pairing.add_secret() do
           {:ok, secret} ->
-            node_cert_path = Keyword.fetch!(config, :node_cert)
-            tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
-            host = Keyword.get(config, :host, "127.0.0.1")
+            case Keyword.fetch(config, :node_cert) do
+              {:ok, node_cert_path} ->
+                tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
+                host = Keyword.get(config, :host, "127.0.0.1")
 
-            case Cortex.Mesh.JoinToken.cert_fingerprint(node_cert_path) do
-              {:ok, fingerprint} ->
-                token = Cortex.Mesh.JoinToken.encode(host, tls_port, secret, fingerprint)
-                {:ok, token}
+                case Cortex.Mesh.JoinToken.cert_fingerprint(node_cert_path) do
+                  {:ok, fingerprint} ->
+                    token = Cortex.Mesh.JoinToken.encode(host, tls_port, secret, fingerprint)
+                    {:ok, token}
 
-              {:error, reason} ->
-                {:error, "failed to compute cert fingerprint: #{inspect(reason)}"}
+                  {:error, reason} ->
+                    {:error, "failed to compute cert fingerprint: #{inspect(reason)}"}
+                end
+
+              :error ->
+                {:error, "mesh config missing :node_cert"}
             end
 
           {:error, reason} ->
