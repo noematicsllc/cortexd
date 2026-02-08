@@ -4,7 +4,7 @@
 
 A local storage daemon providing an embedded Mnesia database accessible via Unix socket or mesh network. UID-based authentication for local connections, mTLS for remote nodes, with per-table access control.
 
-**Current version: 0.2.7**
+**Current version: 0.2.8**
 
 ## Features
 
