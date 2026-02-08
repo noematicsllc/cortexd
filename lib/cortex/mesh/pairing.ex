@@ -44,8 +44,8 @@ defmodule Cortex.Mesh.Pairing do
         :ignore
 
       config ->
-        tls_port = Keyword.get(config, :tls_port, 5528)
-        pairing_port = tls_port + 1
+        tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
+        pairing_port = tls_port + Cortex.pairing_port_offset()
         node_cert = Keyword.fetch!(config, :node_cert)
         node_key = Keyword.fetch!(config, :node_key)
         ca_cert = Keyword.fetch!(config, :ca_cert)
@@ -199,7 +199,7 @@ defmodule Cortex.Mesh.Pairing do
 
   defp build_peer_list(config) do
     node_name = Keyword.fetch!(config, :node_name)
-    tls_port = Keyword.get(config, :tls_port, 5528)
+    tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
     nodes = Keyword.get(config, :nodes, [])
 
     # Include self + known peers
@@ -216,7 +216,7 @@ defmodule Cortex.Mesh.Pairing do
   end
 
   defp add_peer_to_config(node_name, config) do
-    tls_port = Keyword.get(config, :tls_port, 5528)
+    tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
     existing_nodes = Keyword.get(config, :nodes, [])
 
     # Don't add if a peer with this name already exists

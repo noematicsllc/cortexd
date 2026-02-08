@@ -12,6 +12,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_SOCKET: &str = "/run/cortex/cortex.sock";
 
+// Default ports derived from TA2 (Terminologia Anatomica) term numbers
+// for subdivisions of the cerebral cortex:
+//
+//   5528  Cortex cerebri    — Mesh TLS (main inter-node traffic)
+//   5529  Allocortex        — Pairing (simpler handshake for new nodes)
+//   5530  Archicortex       — (reserved: replication/sync)
+//   5531  Paleocortex       — (reserved: discovery/monitoring)
+//   5532  Neocortex         — (reserved: compute/orchestration)
+//   5533  Juxtallocortex    — (reserved: gateway/proxy)
+//   5534  Isocortex         — (reserved: admin/management)
+const DEFAULT_TLS_PORT: u16 = 5528;
+const PAIRING_PORT_OFFSET: u16 = 1;
+
 static MSG_ID: AtomicU32 = AtomicU32::new(1);
 
 #[derive(Parser)]
@@ -188,8 +201,8 @@ enum MeshCommands {
         #[arg(long)]
         name: Option<String>,
 
-        /// TLS port (default: 5528)
-        #[arg(long, default_value = "5528")]
+        /// TLS port (TA2 5528: cortex cerebri)
+        #[arg(long, default_value_t = DEFAULT_TLS_PORT)]
         port: u16,
 
         /// Overwrite existing mesh config
@@ -922,7 +935,7 @@ fn mesh_join(
             return ExitCode::FAILURE;
         }
     };
-    let pairing_port = tls_port + 1;
+    let pairing_port = tls_port + PAIRING_PORT_OFFSET;
 
     let node_name = name
         .map(String::from)
@@ -1134,7 +1147,7 @@ fn mesh_join(
                     if parts.len() >= 3 {
                         let name = match &parts[0] { Value::String(s) => s.as_str().unwrap_or("").to_string(), _ => return None };
                         let host = match &parts[1] { Value::String(s) => s.as_str().unwrap_or("").to_string(), _ => return None };
-                        let port = match &parts[2] { Value::Integer(i) => i.as_u64().unwrap_or(5528).to_string(), _ => return None };
+                        let port = match &parts[2] { Value::Integer(i) => i.as_u64().unwrap_or(DEFAULT_TLS_PORT as u64).to_string(), _ => return None };
                         return Some(format!("{}:{}:{}", name, host, port));
                     }
                 }
@@ -1165,7 +1178,7 @@ fn mesh_join(
         .next()
         .and_then(|p| p.split(':').nth(2))
         .and_then(|p| p.parse().ok())
-        .unwrap_or(5528);
+        .unwrap_or(DEFAULT_TLS_PORT);
 
     // Step 8: Write mesh.env
     let env_path = DEFAULT_MESH_ENV;

@@ -453,7 +453,7 @@ defmodule Cortex.Handler do
         case Cortex.Mesh.Pairing.add_secret() do
           {:ok, secret} ->
             node_cert_path = Keyword.fetch!(config, :node_cert)
-            tls_port = Keyword.get(config, :tls_port, 5528)
+            tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
             host = Keyword.get(config, :host, "127.0.0.1")
 
             case Cortex.Mesh.JoinToken.cert_fingerprint(node_cert_path) do
