@@ -54,6 +54,19 @@ defmodule Cortex.Sync do
   Replicates appropriate tables to the new node.
   """
   def on_node_join(new_node) do
+    # Introduce the remote node to local Mnesia. Without this, Mnesia doesn't
+    # know about the peer's schema and add_table_copy fails with :not_active.
+    case :mnesia.change_config(:extra_db_nodes, [new_node]) do
+      {:ok, [^new_node]} ->
+        Logger.info("Mnesia connected to #{new_node}")
+
+      {:ok, []} ->
+        Logger.warning("Mnesia could not connect to #{new_node}")
+
+      {:error, reason} ->
+        Logger.warning("Mnesia change_config failed for #{new_node}: #{inspect(reason)}")
+    end
+
     # Always replicate system tables
     for table <- @system_tables do
       setup_replication(table, new_node)
@@ -154,7 +167,17 @@ defmodule Cortex.Sync do
   defp replication_max_attempts, do: Application.get_env(:cortex, :replication_max_attempts, 8)
   defp replication_base_delay, do: Application.get_env(:cortex, :replication_base_delay, 250)
 
+  defp ensure_mnesia_connected(target_node) do
+    known = :mnesia.system_info(:db_nodes)
+
+    unless target_node in known do
+      :mnesia.change_config(:extra_db_nodes, [target_node])
+    end
+  end
+
   defp setup_replication(table, target_node, attempt \\ 1) do
+    if attempt == 1, do: ensure_mnesia_connected(target_node)
+
     case :mnesia.add_table_copy(table, target_node, :disc_copies) do
       {:atomic, :ok} ->
         if attempt > 1, do: Logger.info("Replicated #{table} to #{target_node} (attempt #{attempt})")
