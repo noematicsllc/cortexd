@@ -107,13 +107,14 @@ defmodule Cortex.Mesh.Pairing do
     tls_port = Keyword.get(state.config, :tls_port, Cortex.default_tls_port())
     existing_nodes = Keyword.get(state.config, :nodes, [])
 
-    unless Enum.any?(existing_nodes, fn {name, _, _} -> name == node_name end) do
+    if Enum.any?(existing_nodes, fn {name, _, _} -> name == node_name end) do
+      {:noreply, state}
+    else
       updated_nodes = existing_nodes ++ [{node_name, peer_host, tls_port}]
       updated_config = Keyword.put(state.config, :nodes, updated_nodes)
       Application.put_env(:cortex, :mesh, updated_config)
+      {:noreply, %{state | config: updated_config}}
     end
-
-    {:noreply, state}
   end
 
   @impl true
@@ -192,12 +193,12 @@ defmodule Cortex.Mesh.Pairing do
               "peers" => peers
             }
 
+            peer_host = peer_host_from_socket(ssl_socket)
             response = Protocol.encode_response(msgid, result)
             :ssl.send(ssl_socket, response)
             :ssl.close(ssl_socket)
 
             # Add the new node to the seed's mesh peer list
-            peer_host = peer_host_from_socket(ssl_socket)
             GenServer.cast(__MODULE__, {:add_peer, node_name, peer_host})
 
             Logger.info("Paired node: #{node_name}")

@@ -1036,7 +1036,7 @@ fn mesh_join(
         }
     };
 
-    let tcp_stream = match std::net::TcpStream::connect(format!("{}:{}", host, pairing_port)) {
+    let tcp_stream = match std::net::TcpStream::connect((host.as_str(), pairing_port)) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: cannot connect to {}:{}: {}", host, pairing_port, e);
@@ -1100,6 +1100,7 @@ fn mesh_join(
     }
 
     // Step 6: Read response (loop until full MessagePack value is received)
+    const MAX_RESPONSE_BYTES: usize = 1_048_576; // 1MB
     let mut response_buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let response = loop {
@@ -1115,6 +1116,10 @@ fn mesh_join(
             }
         };
         response_buf.extend_from_slice(&chunk[..n]);
+        if response_buf.len() > MAX_RESPONSE_BYTES {
+            eprintln!("error: pairing response too large");
+            return ExitCode::FAILURE;
+        }
         match rmpv::decode::read_value(&mut &response_buf[..]) {
             Ok(v) => break v,
             Err(_) => continue,
