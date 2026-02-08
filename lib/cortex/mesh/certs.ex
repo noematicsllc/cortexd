@@ -122,6 +122,112 @@ defmodule Cortex.Mesh.Certs do
     end
   end
 
+  @doc """
+  Initialize a complete mesh in one step: create CA + node cert.
+  Returns {:ok, %{ca_cert: path, node_cert: path, node_key: path}} or {:error, reason}.
+
+  Options:
+    - :node_name - node name for the certificate CN (required)
+    - :host - hostname or IP for SAN entries (required)
+    - :force - overwrite existing files (default: false)
+  """
+  def init_mesh(output_dir, opts \\ []) do
+    with {:ok, node_name} <- Keyword.fetch(opts, :node_name),
+         {:ok, host} <- Keyword.fetch(opts, :host) do
+      force = Keyword.get(opts, :force, false)
+
+      with {:ok, ca_cert_path} <- init_ca(output_dir, force: force),
+           {:ok, node_cert_path} <-
+             add_node(output_dir, node_name, host, output_dir: output_dir) do
+        node_key_path = Path.join(output_dir, "#{node_name}.key")
+        {:ok, %{ca_cert: ca_cert_path, node_cert: node_cert_path, node_key: node_key_path}}
+      end
+    else
+      :error -> {:error, "missing required option: :node_name and :host are required"}
+    end
+  end
+
+  @doc """
+  Sign a PEM-encoded CSR with the mesh CA.
+  Returns {:ok, cert_pem} or {:error, reason}.
+  """
+  def sign_csr(csr_pem, ca_dir, opts \\ []) do
+    ca_key_path = Path.join(ca_dir, "ca.key")
+    ca_cert_path = Path.join(ca_dir, "ca.crt")
+
+    cond do
+      not File.exists?(ca_key_path) ->
+        {:error, "CA key not found at #{ca_dir}"}
+
+      not File.exists?(ca_cert_path) ->
+        {:error, "CA certificate not found at #{ca_dir}"}
+
+      true ->
+        node_name = Keyword.get(opts, :node_name)
+        host = Keyword.get(opts, :host)
+
+        # Write CSR to temp file
+        tmp_dir = System.tmp_dir!()
+        tmp_id = :erlang.unique_integer([:positive])
+        csr_path = Path.join(tmp_dir, "pairing_#{tmp_id}.csr")
+        cert_path = Path.join(tmp_dir, "pairing_#{tmp_id}.crt")
+        ext_path = Path.join(tmp_dir, "pairing_#{tmp_id}.ext")
+        serial_path = Path.join(tmp_dir, "pairing_#{tmp_id}.srl")
+
+        try do
+          with :ok <- File.write(csr_path, csr_pem),
+               :ok <- maybe_write_ext(ext_path, node_name, host),
+               :ok <-
+                 run_openssl(
+                   [
+                     "x509",
+                     "-req",
+                     "-in",
+                     csr_path,
+                     "-CA",
+                     ca_cert_path,
+                     "-CAkey",
+                     ca_key_path,
+                     "-CAserial",
+                     serial_path,
+                     "-CAcreateserial",
+                     "-out",
+                     cert_path,
+                     "-days",
+                     to_string(@node_validity_days)
+                   ] ++
+                     if(File.exists?(ext_path), do: ["-extfile", ext_path], else: [])
+                 ),
+               {:ok, cert_pem} <- File.read(cert_path) do
+            {:ok, cert_pem}
+          end
+        after
+          File.rm(csr_path)
+          File.rm(cert_path)
+          File.rm(ext_path)
+          File.rm(serial_path)
+        end
+    end
+  end
+
+  defp maybe_write_ext(ext_path, node_name, host) do
+    san_entries =
+      if(node_name, do: ["DNS:#{node_name}"], else: []) ++
+        if(host, do: san_for_host(host), else: [])
+
+    if san_entries != [] do
+      ext_content =
+        "subjectAltName=#{Enum.join(san_entries, ",")}\n" <>
+          "basicConstraints=CA:FALSE\n" <>
+          "keyUsage=digitalSignature,keyEncipherment\n" <>
+          "extendedKeyUsage=serverAuth,clientAuth\n"
+
+      File.write(ext_path, ext_content)
+    else
+      :ok
+    end
+  end
+
   defp san_for_host(host) do
     case :inet.parse_address(String.to_charlist(host)) do
       {:ok, _ip} -> ["IP:#{host}"]

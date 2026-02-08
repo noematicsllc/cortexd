@@ -444,6 +444,42 @@ defmodule Cortex.Handler do
     end
   end
 
+  defp dispatch("mesh_invite", _params, uid, _requesting_node) when uid != 0 do
+    {:error, "mesh_invite requires root (uid 0)"}
+  end
+
+  defp dispatch("mesh_invite", _params, _uid, _requesting_node) do
+    case Cortex.mesh_config() do
+      nil ->
+        {:error, "mesh networking not configured"}
+
+      config ->
+        case Cortex.Mesh.Pairing.add_secret() do
+          {:ok, secret} ->
+            case Keyword.fetch(config, :node_cert) do
+              {:ok, node_cert_path} ->
+                tls_port = Keyword.get(config, :tls_port, Cortex.default_tls_port())
+                host = Keyword.get(config, :host, "127.0.0.1")
+
+                case Cortex.Mesh.JoinToken.cert_fingerprint(node_cert_path) do
+                  {:ok, fingerprint} ->
+                    token = Cortex.Mesh.JoinToken.encode(host, tls_port, secret, fingerprint)
+                    {:ok, token}
+
+                  {:error, reason} ->
+                    {:error, "failed to compute cert fingerprint: #{inspect(reason)}"}
+                end
+
+              :error ->
+                {:error, "mesh config missing :node_cert"}
+            end
+
+          {:error, reason} ->
+            {:error, "failed to generate secret: #{inspect(reason)}"}
+        end
+    end
+  end
+
   # Sync methods
 
   defp dispatch("sync_status", _params, _uid, _requesting_node) do

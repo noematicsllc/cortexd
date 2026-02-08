@@ -6,6 +6,7 @@ config :cortex,
   data_dir: System.get_env("CORTEX_DATA_DIR", "/var/lib/cortex/mnesia")
 
 # Mesh networking (optional — omit to run in single-node mode)
+# Ports: 5528 mesh TLS, 5529 pairing (TA2 cortex cerebri / allocortex)
 # config :cortex, :mesh,
 #   node_name: "my-node",
 #   tls_port: 5528,

@@ -1,5 +1,8 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use clap::{Parser, Subcommand};
 use rmpv::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -8,6 +11,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_SOCKET: &str = "/run/cortex/cortex.sock";
+
+// Default ports derived from TA2 (Terminologia Anatomica) term numbers
+// for subdivisions of the cerebral cortex:
+//
+//   5528  Cortex cerebri    — Mesh TLS (main inter-node traffic)
+//   5529  Allocortex        — Pairing (simpler handshake for new nodes)
+//   5530  Archicortex       — (reserved: replication/sync)
+//   5531  Paleocortex       — (reserved: discovery/monitoring)
+//   5532  Neocortex         — (reserved: compute/orchestration)
+//   5533  Juxtallocortex    — (reserved: gateway/proxy)
+//   5534  Isocortex         — (reserved: admin/management)
+const DEFAULT_TLS_PORT: u16 = 5528;
+const PAIRING_PORT_OFFSET: u16 = 1;
 
 static MSG_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -175,7 +191,51 @@ enum AclCommands {
 
 #[derive(Subcommand)]
 enum MeshCommands {
-    /// Initialize a new mesh Certificate Authority
+    /// Initialize a new mesh (generate CA, certs, config, and print join token)
+    Init {
+        /// Host IP or hostname for this node (auto-detected if omitted)
+        #[arg(long)]
+        host: Option<String>,
+
+        /// Node name (default: hostname with random suffix)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// TLS port (TA2 5528: cortex cerebri)
+        #[arg(long, default_value_t = DEFAULT_TLS_PORT)]
+        port: u16,
+
+        /// Overwrite existing mesh config
+        #[arg(long)]
+        force: bool,
+
+        /// Certificate directory (default: /etc/cortex/mesh)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+
+    /// Join an existing mesh using a join token
+    Join {
+        /// Join token (cxm_...)
+        token: String,
+
+        /// Node name (default: hostname with random suffix)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Overwrite existing mesh config
+        #[arg(long)]
+        force: bool,
+
+        /// Certificate directory (default: /etc/cortex/mesh)
+        #[arg(long)]
+        dir: Option<String>,
+    },
+
+    /// Generate a join token for a new node to join the mesh
+    Invite,
+
+    /// Initialize a new mesh Certificate Authority (manual workflow)
     InitCa {
         /// Directory for CA files (default: ~/.cortex/mesh)
         #[arg(long)]
@@ -186,7 +246,7 @@ enum MeshCommands {
         force: bool,
     },
 
-    /// Add a node to the mesh (generate node certificate)
+    /// Add a node to the mesh (manual workflow)
     AddNode {
         /// Node name (alphanumeric, hyphens, underscores)
         name: String,
@@ -359,6 +419,31 @@ fn main() -> ExitCode {
             AclCommands::List => call(&cli.socket, "acl_list", vec![]),
         },
         Some(Commands::Mesh { command }) => match command {
+            MeshCommands::Init {
+                host,
+                name,
+                port,
+                force,
+                dir,
+            } => {
+                return mesh_init(
+                    &cli.socket,
+                    host.as_deref(),
+                    name.as_deref(),
+                    *port,
+                    *force,
+                    dir.as_deref(),
+                );
+            }
+            MeshCommands::Join {
+                token,
+                name,
+                force,
+                dir,
+            } => {
+                return mesh_join(&cli.socket, token, name.as_deref(), *force, dir.as_deref());
+            }
+            MeshCommands::Invite => call(&cli.socket, "mesh_invite", vec![]),
             MeshCommands::InitCa { dir, force } => {
                 return mesh_init_ca(dir.as_deref(), *force);
             }
@@ -635,6 +720,624 @@ fn mesh_add_node(name: &str, host: &str, dir: Option<&str>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+// --- Mesh init/join/invite ---
+
+const DEFAULT_MESH_CERT_DIR: &str = "/etc/cortex/mesh";
+const DEFAULT_MESH_ENV: &str = "/etc/cortex/mesh.env";
+
+fn default_node_name() -> String {
+    let hostname = hostname::get()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "node".to_string());
+    // Trim to first component, add random suffix
+    let base = hostname.split('.').next().unwrap_or("node");
+    let suffix: String = (0..4)
+        .map(|_| format!("{:02x}", rand::random::<u8>()))
+        .collect();
+    format!("{}-{}", base, suffix)
+}
+
+fn detect_host_ip() -> Result<String, String> {
+    // Try to detect primary IP by connecting to a public address
+    // (doesn't actually send data, just determines the local interface)
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").map_err(|e| {
+        format!(
+            "failed to detect host IP: {}\nUse --host to specify manually",
+            e
+        )
+    })?;
+
+    // Connect to a public DNS — this picks the default route interface
+    socket.connect("8.8.8.8:80").map_err(|e| {
+        format!(
+            "failed to detect host IP (no network route): {}\nUse --host to specify manually",
+            e
+        )
+    })?;
+
+    let addr = socket.local_addr().map_err(|e| {
+        format!(
+            "failed to detect host IP: {}\nUse --host to specify manually",
+            e
+        )
+    })?;
+
+    Ok(addr.ip().to_string())
+}
+
+struct MeshEnvConfig<'a> {
+    node_name: &'a str,
+    tls_port: u16,
+    ca_cert: &'a str,
+    node_cert: &'a str,
+    node_key: &'a str,
+    peers: &'a str,
+    host: &'a str,
+}
+
+fn write_mesh_env(cfg: &MeshEnvConfig, env_path: &str) -> Result<(), String> {
+    let content = format!(
+        "CORTEX_MESH_NODE_NAME={}\nCORTEX_MESH_TLS_PORT={}\nCORTEX_MESH_CA_CERT={}\nCORTEX_MESH_NODE_CERT={}\nCORTEX_MESH_NODE_KEY={}\nCORTEX_MESH_NODES={}\nCORTEX_MESH_HOST={}\n",
+        cfg.node_name, cfg.tls_port, cfg.ca_cert, cfg.node_cert, cfg.node_key, cfg.peers, cfg.host
+    );
+
+    fs::write(env_path, &content).map_err(|e| format!("cannot write {}: {}", env_path, e))
+}
+
+fn restart_daemon_and_wait(socket_path: &str) -> Result<(), String> {
+    // Detect init system and restart accordingly
+    let (cmd, args, log_hint): (&str, Vec<&str>, &str) =
+        if std::path::Path::new("/run/systemd/system").exists() {
+            (
+                "systemctl",
+                vec!["restart", "cortexd"],
+                "journalctl -u cortexd",
+            )
+        } else if cfg!(target_os = "macos") {
+            (
+                "launchctl",
+                vec!["kickstart", "-k", "system/com.cortex.cortexd"],
+                "log show --predicate 'subsystem == \"com.cortex\"' --last 1m",
+            )
+        } else {
+            return Err("unsupported init system: cannot auto-restart.\n\
+                 Please restart cortexd manually, then re-run this command."
+                .to_string());
+        };
+
+    let output = Command::new(cmd)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("failed to run {}: {}", cmd, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "{} restart failed: {}\nCheck: {}",
+            cmd,
+            stderr.trim(),
+            log_hint
+        ));
+    }
+
+    // Poll for health
+    for _ in 0..20 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if call(socket_path, "ping", vec![]).is_ok() {
+            return Ok(());
+        }
+    }
+
+    Err(format!(
+        "daemon did not become healthy within 10 seconds.\nCheck: {}",
+        log_hint
+    ))
+}
+
+fn mesh_init(
+    socket_path: &str,
+    host: Option<&str>,
+    name: Option<&str>,
+    port: u16,
+    force: bool,
+    dir: Option<&str>,
+) -> ExitCode {
+    let mesh_dir = dir
+        .map(String::from)
+        .unwrap_or_else(|| DEFAULT_MESH_CERT_DIR.to_string());
+    let ca_key = format!("{}/ca.key", mesh_dir);
+
+    // Check if already exists
+    if std::path::Path::new(&ca_key).exists() && !force {
+        eprintln!(
+            "error: mesh already initialized at {}. Use --force to overwrite.",
+            mesh_dir
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let node_name = name.map(String::from).unwrap_or_else(default_node_name);
+
+    let host_str = match host {
+        Some(h) => h.to_string(),
+        None => match detect_host_ip() {
+            Ok(ip) => ip,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+
+    // Validate node name
+    if !node_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        || node_name.is_empty()
+    {
+        eprintln!("error: invalid node name: must be alphanumeric with hyphens/underscores");
+        return ExitCode::FAILURE;
+    }
+
+    eprintln!("Initializing mesh...");
+    eprintln!("  Node name: {}", node_name);
+    eprintln!("  Host: {}", host_str);
+    eprintln!("  TLS port: {}", port);
+    eprintln!("  Cert dir: {}", mesh_dir);
+
+    // Step 1: Generate CA
+    if let ExitCode::FAILURE = mesh_init_ca(Some(&mesh_dir), force) {
+        return ExitCode::FAILURE;
+    }
+
+    // Step 2: Generate node cert
+    if let ExitCode::FAILURE = mesh_add_node(&node_name, &host_str, Some(&mesh_dir)) {
+        return ExitCode::FAILURE;
+    }
+
+    let ca_cert = format!("{}/ca.crt", mesh_dir);
+    let node_cert = format!("{}/nodes/{}.crt", mesh_dir, node_name);
+    let node_key = format!("{}/nodes/{}.key", mesh_dir, node_name);
+
+    // Step 3: Write mesh.env
+    let env_path = DEFAULT_MESH_ENV;
+    if let Err(e) = write_mesh_env(
+        &MeshEnvConfig {
+            node_name: &node_name,
+            tls_port: port,
+            ca_cert: &ca_cert,
+            node_cert: &node_cert,
+            node_key: &node_key,
+            peers: "",
+            host: &host_str,
+        },
+        env_path,
+    ) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+    eprintln!("  Mesh config: {}", env_path);
+
+    // Step 4: Restart daemon
+    eprintln!("Restarting cortexd...");
+    if let Err(e) = restart_daemon_and_wait(socket_path) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Step 5: Get join token
+    match call(socket_path, "mesh_invite", vec![]) {
+        Ok(Some(Value::String(token))) => {
+            let token_str = token.as_str().unwrap_or_default();
+            println!();
+            println!("Mesh initialized on {}:{}", host_str, port);
+            println!("Join token: {}", token_str);
+            println!();
+            println!("Share this token with other nodes to join the mesh.");
+            ExitCode::SUCCESS
+        }
+        Ok(_) => {
+            eprintln!("error: unexpected response from mesh_invite");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("error: failed to generate join token: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn decode_join_token(token: &str) -> Result<(String, u16, String, String), String> {
+    let payload_b64 = token
+        .strip_prefix("cxm_")
+        .ok_or_else(|| "invalid join token: must start with cxm_".to_string())?;
+
+    let payload_bytes = URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .map_err(|e| format!("invalid join token encoding: {}", e))?;
+
+    let payload = String::from_utf8(payload_bytes)
+        .map_err(|_| "invalid join token: not valid UTF-8".to_string())?;
+
+    let parts: Vec<&str> = payload.split('|').collect();
+    if parts.len() != 4 {
+        return Err("invalid join token: expected 4 pipe-delimited fields".to_string());
+    }
+
+    let host = parts[0].to_string();
+    let port: u16 = parts[1]
+        .parse()
+        .map_err(|_| "invalid join token: bad port".to_string())?;
+    let secret = parts[2].to_string();
+    let cert_fingerprint = parts[3].to_string();
+
+    Ok((host, port, secret, cert_fingerprint))
+}
+
+fn mesh_join(
+    socket_path: &str,
+    token: &str,
+    name: Option<&str>,
+    force: bool,
+    dir: Option<&str>,
+) -> ExitCode {
+    let mesh_dir = dir
+        .map(String::from)
+        .unwrap_or_else(|| DEFAULT_MESH_CERT_DIR.to_string());
+    let ca_cert_path = format!("{}/ca.crt", mesh_dir);
+
+    // Check if already exists
+    if std::path::Path::new(&ca_cert_path).exists() && !force {
+        eprintln!(
+            "error: mesh already configured at {}. Use --force to overwrite.",
+            mesh_dir
+        );
+        return ExitCode::FAILURE;
+    }
+
+    // Step 1: Decode token
+    let (host, tls_port, secret, cert_fingerprint) = match decode_join_token(token) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let pairing_port = tls_port
+        .checked_add(PAIRING_PORT_OFFSET)
+        .unwrap_or_else(|| {
+            eprintln!(
+                "error: TLS port {} too high for pairing port offset",
+                tls_port
+            );
+            std::process::exit(1);
+        });
+
+    let node_name = name.map(String::from).unwrap_or_else(default_node_name);
+
+    // Validate node name (same rules as mesh_init)
+    if !node_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        || node_name.is_empty()
+    {
+        eprintln!("error: invalid node name: must be alphanumeric with hyphens/underscores");
+        return ExitCode::FAILURE;
+    }
+
+    eprintln!("Joining mesh...");
+    eprintln!("  Seed: {}:{}", host, tls_port);
+    eprintln!("  Node name: {}", node_name);
+
+    // Step 2: Generate local keypair + CSR
+    if let Err(e) = fs::create_dir_all(&mesh_dir) {
+        eprintln!("error: cannot create directory {}: {}", mesh_dir, e);
+        return ExitCode::FAILURE;
+    }
+
+    let node_key = format!("{}/{}.key", mesh_dir, node_name);
+    let node_csr = format!("{}/{}.csr", mesh_dir, node_name);
+
+    if let Err(e) = run_openssl(&["genrsa", "-out", &node_key, "2048"]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&node_key, fs::Permissions::from_mode(0o600));
+    }
+
+    if let Err(e) = run_openssl(&[
+        "req",
+        "-new",
+        "-key",
+        &node_key,
+        "-out",
+        &node_csr,
+        "-subj",
+        &format!("/CN={}", node_name),
+    ]) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    let csr_pem = match fs::read_to_string(&node_csr) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot read CSR: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let _ = fs::remove_file(&node_csr);
+
+    // Step 3: Connect to seed's pairing port over TLS
+    eprintln!("  Connecting to {}:{}...", host, pairing_port);
+
+    let connector = match native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true) // We verify via fingerprint instead
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: TLS setup failed: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let tcp_stream = match std::net::TcpStream::connect((host.as_str(), pairing_port)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: cannot connect to {}:{}: {}", host, pairing_port, e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let tls_stream = match connector.connect(&host, tcp_stream) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: TLS handshake failed: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Step 4: Verify CA fingerprint
+    let peer_cert = match tls_stream.peer_certificate() {
+        Ok(Some(cert)) => cert,
+        _ => {
+            eprintln!("error: no peer certificate from seed node");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let cert_der = match peer_cert.to_der() {
+        Ok(der) if !der.is_empty() => der,
+        _ => {
+            eprintln!("error: failed to encode peer certificate to DER");
+            return ExitCode::FAILURE;
+        }
+    };
+    let fingerprint = format!("{:x}", Sha256::digest(&cert_der));
+
+    if fingerprint != cert_fingerprint {
+        eprintln!("error: CA fingerprint mismatch!");
+        eprintln!("  Expected: {}", cert_fingerprint);
+        eprintln!("  Got:      {}", fingerprint);
+        eprintln!("  This may indicate a man-in-the-middle attack.");
+        return ExitCode::FAILURE;
+    }
+
+    eprintln!("  CA fingerprint verified.");
+
+    // Step 5: Send mesh.pair RPC
+    let mut tls_stream = tls_stream;
+    let msgid = MSG_ID.fetch_add(1, Ordering::SeqCst);
+    let request = Value::Array(vec![
+        Value::Integer(0.into()),
+        Value::Integer(msgid.into()),
+        Value::String("mesh.pair".into()),
+        Value::Array(vec![
+            Value::String(secret.into()),
+            Value::String(csr_pem.into()),
+            Value::String(node_name.clone().into()),
+        ]),
+    ]);
+
+    let mut buf = Vec::new();
+    if let Err(e) = rmpv::encode::write_value(&mut buf, &request) {
+        eprintln!("error: encode failed: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(e) = tls_stream.write_all(&buf) {
+        eprintln!("error: failed to send pairing request: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Step 6: Read response (loop until full MessagePack value is received)
+    const MAX_RESPONSE_BYTES: usize = 1_048_576; // 1MB
+    let mut response_buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let response = loop {
+        let n = match tls_stream.read(&mut chunk) {
+            Ok(0) => {
+                eprintln!("error: connection closed before full response received");
+                return ExitCode::FAILURE;
+            }
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("error: failed to read pairing response: {}", e);
+                return ExitCode::FAILURE;
+            }
+        };
+        response_buf.extend_from_slice(&chunk[..n]);
+        if response_buf.len() > MAX_RESPONSE_BYTES {
+            eprintln!("error: pairing response too large");
+            return ExitCode::FAILURE;
+        }
+        match rmpv::decode::read_value(&mut &response_buf[..]) {
+            Ok(v) => break v,
+            Err(_) => continue,
+        }
+    };
+
+    // Parse response: [1, msgid, error, result]
+    let result_map = match &response {
+        Value::Array(parts) if parts.len() == 4 => {
+            if parts[2] != Value::Nil {
+                let err_str = match &parts[2] {
+                    Value::String(s) => s.as_str().unwrap_or("unknown error").to_string(),
+                    _ => format!("{}", parts[2]),
+                };
+                eprintln!("error: pairing failed: {}", err_str);
+                return ExitCode::FAILURE;
+            }
+            match &parts[3] {
+                Value::Map(m) => m.clone(),
+                _ => {
+                    eprintln!("error: unexpected pairing response format");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        _ => {
+            eprintln!("error: invalid pairing response");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Extract cert, ca_cert, peers from the map
+    let get_str = |key: &str| -> Option<String> {
+        result_map.iter().find_map(|(k, v)| {
+            if let (Value::String(ks), Value::String(vs)) = (k, v) {
+                if ks.as_str() == Some(key) {
+                    return vs.as_str().map(|s| s.to_string());
+                }
+            }
+            None
+        })
+    };
+
+    let signed_cert = match get_str("cert") {
+        Some(c) => c,
+        None => {
+            eprintln!("error: pairing response missing 'cert'");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let ca_cert_pem = match get_str("ca_cert") {
+        Some(c) => c,
+        None => {
+            eprintln!("error: pairing response missing 'ca_cert'");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Parse peers list
+    let peers_value = result_map.iter().find_map(|(k, v)| {
+        if let Value::String(ks) = k {
+            if ks.as_str() == Some("peers") {
+                return Some(v.clone());
+            }
+        }
+        None
+    });
+
+    let peers_str = match peers_value {
+        Some(Value::Array(arr)) => {
+            let entries: Vec<String> = arr
+                .iter()
+                .filter_map(|entry| {
+                    if let Value::Array(parts) = entry {
+                        if parts.len() >= 3 {
+                            let name = match &parts[0] {
+                                Value::String(s) => s.as_str().unwrap_or("").to_string(),
+                                _ => return None,
+                            };
+                            let host = match &parts[1] {
+                                Value::String(s) => s.as_str().unwrap_or("").to_string(),
+                                _ => return None,
+                            };
+                            let port = match &parts[2] {
+                                Value::Integer(i) => {
+                                    i.as_u64().unwrap_or(DEFAULT_TLS_PORT as u64).to_string()
+                                }
+                                _ => return None,
+                            };
+                            return Some(format!("{}:{}:{}", name, host, port));
+                        }
+                    }
+                    None
+                })
+                .collect();
+            entries.join(",")
+        }
+        _ => String::new(),
+    };
+
+    // Step 7: Write certs
+    let node_cert_path = format!("{}/{}.crt", mesh_dir, node_name);
+
+    if let Err(e) = fs::write(&ca_cert_path, &ca_cert_pem) {
+        eprintln!("error: cannot write CA cert: {}", e);
+        return ExitCode::FAILURE;
+    }
+    if let Err(e) = fs::write(&node_cert_path, &signed_cert) {
+        eprintln!("error: cannot write node cert: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    eprintln!("  Certificate signed by mesh CA.");
+
+    // Determine TLS port from peers (first peer's port), fall back to token's port
+    let mesh_tls_port: u16 = peers_str
+        .split(',')
+        .next()
+        .and_then(|p| p.split(':').nth(2))
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(tls_port);
+
+    // Detect this node's host IP
+    let join_host = match detect_host_ip() {
+        Ok(ip) => ip,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // Step 8: Write mesh.env
+    let env_path = DEFAULT_MESH_ENV;
+    if let Err(e) = write_mesh_env(
+        &MeshEnvConfig {
+            node_name: &node_name,
+            tls_port: mesh_tls_port,
+            ca_cert: &ca_cert_path,
+            node_cert: &node_cert_path,
+            node_key: &node_key,
+            peers: &peers_str,
+            host: &join_host,
+        },
+        env_path,
+    ) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Step 9: Restart daemon
+    eprintln!("Restarting cortexd...");
+    if let Err(e) = restart_daemon_and_wait(socket_path) {
+        eprintln!("error: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    eprintln!("  Mesh configured. Node name: {}", node_name);
+    println!("Joined mesh. Connected peers: {}", peers_str);
+    ExitCode::SUCCESS
+}
+
 // --- RPC communication ---
 
 fn call(socket_path: &str, method: &str, params: Vec<Value>) -> Result<Option<Value>, String> {
@@ -774,8 +1477,11 @@ COMMANDS:
   acl revoke IDENTITY TABLE PERMS   Revoke permissions
   acl list                          List ACLs for your tables
 
-  mesh init-ca                  Initialize mesh Certificate Authority
-  mesh add-node NAME HOST       Generate node certificate
+  mesh init                     Initialize a new mesh and print join token
+  mesh join TOKEN               Join an existing mesh with a token
+  mesh invite                   Generate a join token for new nodes
+  mesh init-ca                  Initialize mesh CA (manual workflow)
+  mesh add-node NAME HOST       Generate node cert (manual workflow)
   mesh list-nodes               List configured mesh nodes
   mesh status                   Show mesh connectivity
 
@@ -965,26 +1671,42 @@ USAGE:
   cortex mesh <subcommand> [args]
 
 SUBCOMMANDS:
-  init-ca                       Initialize mesh Certificate Authority
-  add-node NAME HOST            Generate certificate for a node
+  init                          Initialize a new mesh and print join token
+  join TOKEN                    Join an existing mesh with a token
+  invite                        Generate a join token for new nodes
+  init-ca                       Initialize mesh CA (manual workflow)
+  add-node NAME HOST            Generate certificate for a node (manual)
   list-nodes                    List configured mesh nodes
   status                        Show mesh connectivity status
 
-QUICK START:
+QUICK START (token-based):
+  # On first node:
+  sudo cortex mesh init
+  # → prints a join token: cxm_...
+
+  # On each additional node (copy-paste the token):
+  sudo cortex mesh join cxm_...
+
+  # To add more nodes later, from any mesh node:
+  cortex mesh invite
+
+MANUAL WORKFLOW:
   1. cortex mesh init-ca
   2. cortex mesh add-node my-node 192.168.1.10
   3. Copy certs to node, configure mesh in config.exs
   4. cortex mesh status
 
 OPTIONS:
-  --dir PATH    CA directory (default: ~/.cortex/mesh)
-  --force       Overwrite existing CA (init-ca only)
+  --host HOST   Host IP/hostname (init/join, auto-detected if omitted)
+  --name NAME   Node name (init/join, auto-generated if omitted)
+  --port PORT   TLS port (init, default: 5528)
+  --dir PATH    Cert directory (default: /etc/cortex/mesh)
+  --force       Overwrite existing config
 
 EXAMPLES:
-  cortex mesh init-ca
-  cortex mesh init-ca --dir /etc/cortex/mesh
-  cortex mesh add-node node-a 10.0.0.1
-  cortex mesh list-nodes --pretty
+  sudo cortex mesh init --host 10.0.0.1
+  sudo cortex mesh join cxm_MTU4LjY5Li...
+  cortex mesh invite
   cortex mesh status --pretty"#
         ),
         Some("identity") => println!(

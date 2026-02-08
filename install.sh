@@ -156,6 +156,7 @@ fi
 mkdir -p "$INSTALL_DIR/bin"
 mkdir -p "$INSTALL_DIR/mnesia"
 mkdir -p "$RUN_DIR"
+mkdir -p /etc/cortex/mesh
 
 # Install
 if [ "$FROM_SOURCE" = true ]; then
@@ -193,7 +194,7 @@ RuntimeDirectoryMode=0755
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/cortex /run/cortex
+ReadWritePaths=/var/lib/cortex /run/cortex /etc/cortex
 
 [Install]
 WantedBy=multi-user.target

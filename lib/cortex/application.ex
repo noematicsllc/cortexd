@@ -17,7 +17,7 @@ defmodule Cortex.Application do
         Cortex.Server
       ] ++
         if(Cortex.mesh_config(),
-          do: [Cortex.Mesh.Manager, Cortex.TLSServer],
+          do: [Cortex.Mesh.Manager, Cortex.TLSServer, Cortex.Mesh.Pairing],
           else: []
         )
 
