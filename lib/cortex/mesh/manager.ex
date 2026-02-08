@@ -85,8 +85,18 @@ defmodule Cortex.Mesh.Manager do
     {:noreply, state}
   end
 
-  defp schedule_reconnect do
-    Process.send_after(self(), :reconnect, 30_000)
+  @impl true
+  def handle_info({:nodeup, node}, state) do
+    Logger.info("Mesh node joined: #{node}")
+    Cortex.Sync.on_node_join(node)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:nodedown, node}, state) do
+    Logger.info("Mesh node left: #{node}")
+    Cortex.Sync.on_node_leave(node)
+    {:noreply, state}
   end
 
   @impl true
@@ -107,18 +117,8 @@ defmodule Cortex.Mesh.Manager do
     end
   end
 
-  @impl true
-  def handle_info({:nodeup, node}, state) do
-    Logger.info("Mesh node joined: #{node}")
-    Cortex.Sync.on_node_join(node)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:nodedown, node}, state) do
-    Logger.info("Mesh node left: #{node}")
-    Cortex.Sync.on_node_leave(node)
-    {:noreply, state}
+  defp schedule_reconnect do
+    Process.send_after(self(), :reconnect, 30_000)
   end
 
   @impl true
