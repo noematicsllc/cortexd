@@ -54,7 +54,7 @@ detect_arch() {
 install_from_binary() {
     local arch
     arch="$(detect_arch)"
-    local tarball="cortexd-${VERSION}-${arch}-linux.tar.gz"
+    local tarball="cortexd-${VERSION}-linux-${arch}.tar.gz"
     local url="https://github.com/${REPO}/releases/download/v${VERSION}/${tarball}"
 
     echo "Downloading cortexd v${VERSION} for ${arch}..."
