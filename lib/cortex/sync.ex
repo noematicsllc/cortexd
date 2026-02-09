@@ -182,7 +182,9 @@ defmodule Cortex.Sync do
 
     case :mnesia.add_table_copy(table, target_node, :disc_copies) do
       {:atomic, :ok} ->
-        if attempt > 1, do: Logger.info("Replicated #{table} to #{target_node} (attempt #{attempt})")
+        if attempt > 1,
+          do: Logger.info("Replicated #{table} to #{target_node} (attempt #{attempt})")
+
         Logger.debug("Replicated #{table} to #{target_node}")
         :ok
 
@@ -191,8 +193,12 @@ defmodule Cortex.Sync do
 
       {:aborted, {:not_active, _, _} = reason} ->
         if attempt < replication_max_attempts() do
-          delay = replication_base_delay() * :math.pow(2, attempt - 1) |> trunc() |> min(5_000)
-          Logger.debug("Schema not active on #{target_node} for #{table}, retry #{attempt} in #{delay}ms")
+          delay = (replication_base_delay() * :math.pow(2, attempt - 1)) |> trunc() |> min(5_000)
+
+          Logger.debug(
+            "Schema not active on #{target_node} for #{table}, retry #{attempt} in #{delay}ms"
+          )
+
           Process.sleep(delay)
           setup_replication(table, target_node, attempt + 1)
         else

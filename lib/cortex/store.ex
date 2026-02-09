@@ -245,8 +245,7 @@ defmodule Cortex.Store do
 
                    # Owner gets full access
                    :mnesia.write(
-                     {@acl_table, {uid_identity(owner_uid), table_name},
-                      [:read, :write, :admin]}
+                     {@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]}
                    )
                  end) do
               {:atomic, :ok} ->

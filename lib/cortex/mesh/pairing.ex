@@ -275,8 +275,11 @@ defmodule Cortex.Mesh.Pairing do
       |> Enum.join("\n")
 
     case File.write(env_path, content <> "\n") do
-      :ok -> Logger.info("Updated #{env_path} with #{length(Keyword.get(config, :nodes, []))} peers")
-      {:error, reason} -> Logger.warning("Could not update #{env_path}: #{inspect(reason)}")
+      :ok ->
+        Logger.info("Updated #{env_path} with #{length(Keyword.get(config, :nodes, []))} peers")
+
+      {:error, reason} ->
+        Logger.warning("Could not update #{env_path}: #{inspect(reason)}")
     end
   end
 end
