@@ -133,7 +133,13 @@ defmodule Cortex.Handler do
   defp handle_message([0, msgid, method, params], state) do
     uid = state.uid
     requesting_node = state.node_id
-    result = dispatch(method, params, uid, requesting_node)
+
+    result =
+      try do
+        dispatch(method, params, uid, requesting_node)
+      rescue
+        e -> {:error, "internal error: #{Exception.message(e)}"}
+      end
 
     case result do
       {:ok, value} -> Protocol.encode_response(msgid, value)
@@ -252,7 +258,7 @@ defmodule Cortex.Handler do
   end
 
   defp dispatch("acl_grant", [identity, table_name, perms], uid, requesting_node)
-       when is_binary(table_name) do
+       when is_binary(identity) and is_binary(table_name) do
     table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
     with :ok <- ACL.authorize(uid, table, :acl_grant, requesting_node),
@@ -263,7 +269,7 @@ defmodule Cortex.Handler do
   end
 
   defp dispatch("acl_revoke", [identity, table_name, perms], uid, requesting_node)
-       when is_binary(table_name) do
+       when is_binary(identity) and is_binary(table_name) do
     table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
     with :ok <- ACL.authorize(uid, table, :acl_revoke, requesting_node),
@@ -300,7 +306,7 @@ defmodule Cortex.Handler do
   end
 
   defp dispatch("set_scope", [table_name, scope_str], uid, requesting_node)
-       when is_binary(table_name) do
+       when is_binary(table_name) and is_binary(scope_str) do
     table = Store.resolve_table(uid, table_name, node_name: requesting_node)
 
     with :ok <- ACL.authorize(uid, table, :drop_table, requesting_node) do

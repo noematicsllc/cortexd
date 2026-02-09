@@ -123,7 +123,7 @@ defmodule Cortex.Mesh.Pairing do
     case :ssl.transport_accept(state.socket, 100) do
       {:ok, transport_socket} ->
         handler_ctx = Map.take(state, [:config, :ca_dir])
-        spawn(fn -> complete_pairing_handshake(transport_socket, handler_ctx) end)
+        Task.start(fn -> complete_pairing_handshake(transport_socket, handler_ctx) end)
         send(self(), :accept)
         {:noreply, state}
 
@@ -185,26 +185,35 @@ defmodule Cortex.Mesh.Pairing do
       {:ok, :valid} ->
         case Certs.sign_csr(csr_pem, state.ca_dir, node_name: node_name) do
           {:ok, cert_pem} ->
-            ca_cert_pem = File.read!(Keyword.fetch!(state.config, :ca_cert))
-            peers = build_peer_list(state.config)
+            case File.read(Keyword.fetch!(state.config, :ca_cert)) do
+              {:ok, ca_cert_pem} ->
+                peers = build_peer_list(state.config)
 
-            result = %{
-              "cert" => cert_pem,
-              "ca_cert" => ca_cert_pem,
-              "peers" => peers
-            }
+                result = %{
+                  "cert" => cert_pem,
+                  "ca_cert" => ca_cert_pem,
+                  "peers" => peers
+                }
 
-            peer_host = peer_host_from_socket(ssl_socket)
-            response = Protocol.encode_response(msgid, result)
-            :ssl.send(ssl_socket, response)
-            :ssl.close(ssl_socket)
+                peer_host = peer_host_from_socket(ssl_socket)
+                response = Protocol.encode_response(msgid, result)
+                :ssl.send(ssl_socket, response)
+                :ssl.close(ssl_socket)
 
-            # Add the new node to the seed's mesh peer list and connect
-            tls_port = Keyword.get(state.config, :tls_port, Cortex.default_tls_port())
-            GenServer.cast(__MODULE__, {:add_peer, node_name, peer_host})
-            Cortex.Mesh.Manager.add_peer(node_name, peer_host, tls_port)
+                # Add the new node to the seed's mesh peer list and connect
+                tls_port = Keyword.get(state.config, :tls_port, Cortex.default_tls_port())
+                GenServer.cast(__MODULE__, {:add_peer, node_name, peer_host})
+                Cortex.Mesh.Manager.add_peer(node_name, peer_host, tls_port)
 
-            Logger.info("Paired node: #{node_name}")
+                Logger.info("Paired node: #{node_name}")
+
+              {:error, reason} ->
+                response =
+                  Protocol.encode_error(msgid, "CA cert read failed: #{inspect(reason)}")
+
+                :ssl.send(ssl_socket, response)
+                :ssl.close(ssl_socket)
+            end
 
           {:error, reason} ->
             response = Protocol.encode_error(msgid, "CSR signing failed: #{inspect(reason)}")

@@ -238,18 +238,25 @@ defmodule Cortex.Store do
         case :mnesia.create_table(table_name, mnesia_opts) do
           {:atomic, :ok} ->
             # Store metadata (6-element record with node_scope)
-            :mnesia.transaction(fn ->
-              :mnesia.write(
-                {@meta_table, table_name, owner_uid, key_field, attributes, node_scope}
-              )
+            case :mnesia.transaction(fn ->
+                   :mnesia.write(
+                     {@meta_table, table_name, owner_uid, key_field, attributes, node_scope}
+                   )
 
-              # Owner gets full access
-              :mnesia.write(
-                {@acl_table, {uid_identity(owner_uid), table_name}, [:read, :write, :admin]}
-              )
-            end)
+                   # Owner gets full access
+                   :mnesia.write(
+                     {@acl_table, {uid_identity(owner_uid), table_name},
+                      [:read, :write, :admin]}
+                   )
+                 end) do
+              {:atomic, :ok} ->
+                {:ok, table_name}
 
-            {:ok, table_name}
+              {:aborted, reason} ->
+                # Table was created but metadata failed - clean up
+                :mnesia.delete_table(table_name)
+                {:error, reason}
+            end
 
           {:aborted, {:already_exists, ^table_name}} ->
             {:error, :already_exists}

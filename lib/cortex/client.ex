@@ -44,14 +44,23 @@ defmodule Cortex.Client do
   end
 
   defp receive_response(socket) do
+    receive_response(socket, <<>>)
+  end
+
+  defp receive_response(socket, buffer) do
     case :gen_tcp.recv(socket, 0, 5_000) do
       {:ok, data} ->
-        case Msgpax.unpack(data) do
-          {:ok, [1, _msgid, nil, result]} ->
+        buffer = buffer <> data
+
+        case Msgpax.unpack_slice(buffer) do
+          {:ok, [1, _msgid, nil, result], _rest} ->
             {:ok, result}
 
-          {:ok, [1, _msgid, error, _result]} ->
+          {:ok, [1, _msgid, error, _result], _rest} ->
             {:error, error}
+
+          {:error, %Msgpax.UnpackError{reason: :incomplete}} ->
+            receive_response(socket, buffer)
 
           {:error, reason} ->
             {:error, reason}

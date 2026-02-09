@@ -54,8 +54,8 @@ defmodule Cortex.TLSServer do
   def handle_info(:accept, state) do
     case :ssl.transport_accept(state.socket, 100) do
       {:ok, transport_socket} ->
-        # Handshake in a spawned task to avoid blocking the accept loop
-        spawn(fn -> complete_handshake(transport_socket) end)
+        # Handshake in a task to avoid blocking the accept loop
+        Task.start(fn -> complete_handshake(transport_socket) end)
         send(self(), :accept)
         {:noreply, state}
 
