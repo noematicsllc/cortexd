@@ -54,8 +54,10 @@ defmodule Cortex.Sync do
   Replicates appropriate tables to the new node.
   """
   def on_node_join(new_node) do
-    # Introduce the remote node to local Mnesia. Without this, Mnesia doesn't
-    # know about the peer's schema and add_table_copy fails with :not_active.
+    # Introduce the remote node to local Mnesia for reconnection cases.
+    # On first join, Store.init_as_secondary already handled this via
+    # change_config + add_table_copy. This ensures Mnesia stays connected
+    # after node restarts or network partitions.
     case :mnesia.change_config(:extra_db_nodes, [new_node]) do
       {:ok, [^new_node]} ->
         Logger.info("Mnesia connected to #{new_node}")
@@ -65,20 +67,6 @@ defmodule Cortex.Sync do
 
       {:error, reason} ->
         Logger.warning("Mnesia change_config failed for #{new_node}: #{inspect(reason)}")
-    end
-
-    # Ensure remote node has disc_copies schema — required for disc_copies
-    # table replication. The remote node may have started with ram_copies
-    # if Mnesia auto-started before its data dir was configured.
-    case :rpc.call(new_node, :mnesia, :change_table_copy_type, [:schema, new_node, :disc_copies]) do
-      {:atomic, :ok} ->
-        Logger.info("Upgraded schema to disc_copies on #{new_node}")
-
-      {:aborted, {:already_exists, :schema, _, :disc_copies}} ->
-        :ok
-
-      other ->
-        Logger.warning("Schema disc upgrade on #{new_node}: #{inspect(other)}")
     end
 
     # Always replicate system tables

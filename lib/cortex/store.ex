@@ -22,31 +22,121 @@ defmodule Cortex.Store do
     {:ok, %{}}
   end
 
+  @system_tables_def [
+    {@acl_table, [:identity_table, :permissions]},
+    {@meta_table, [:table_name, :owner, :key_field, :attributes, :node_scope]},
+    {@identities_table, [:fed_id, :mappings, :metadata]}
+  ]
+
   defp setup_mnesia do
-    # Ensure Mnesia application is loaded (but don't start it yet)
-    case Application.load(:mnesia) do
-      :ok -> :ok
-      {:error, {:already_loaded, :mnesia}} -> :ok
-    end
-
-    # Configure directory before starting
     data_dir = Cortex.data_dir() |> String.to_charlist()
-    Application.put_env(:mnesia, :dir, data_dir)
 
-    case :mnesia.create_schema([node()]) do
-      :ok -> :ok
-      {:error, {_, {:already_exists, _}}} -> :ok
-      {:error, reason} -> Logger.warning("Schema creation: #{inspect(reason)}")
+    if system_tables_exist?() do
+      # Restart case: tables already have correct cookies from previous run.
+      # Just ensure schema is disc_copies and we're good.
+      ensure_disc_schema()
+      Logger.info("Mnesia started (existing tables), data dir: #{data_dir}")
+    else
+      case find_seed_node() do
+        nil ->
+          # Standalone or seed node: create schema and tables locally.
+          init_as_primary(data_dir)
+
+        seed ->
+          # Joining an existing mesh: wipe local schema, copy from seed.
+          init_as_secondary(seed, data_dir)
+      end
+    end
+  end
+
+  # First node / standalone: create everything from scratch.
+  defp init_as_primary(data_dir) do
+    ensure_mnesia_started()
+    ensure_disc_schema()
+
+    for {name, attrs} <- @system_tables_def do
+      create_system_table(name, attrs)
     end
 
+    Logger.info("Mnesia started as primary, data dir: #{data_dir}")
+  end
+
+  # Joining node: wipe local schema to avoid cookie conflicts,
+  # then connect to seed and copy tables from the cluster.
+  defp init_as_secondary(seed, data_dir) do
+    Logger.info("Joining Mnesia cluster via #{seed}")
+
+    # Stop Mnesia (it was auto-started by extra_applications)
+    :mnesia.stop()
+
+    # Delete local schema — this removes all table definitions and their
+    # cookies so there's nothing to conflict during the merge.
+    :mnesia.delete_schema([node()])
+
+    # Start fresh with an empty ram_copies schema
+    :ok = ensure_mnesia_started()
+
+    # Connect to seed's Mnesia and merge schemas. Our schema is empty
+    # ram_copies so the merge adopts the seed's schema without conflicts.
+    connected =
+      case :mnesia.change_config(:extra_db_nodes, [seed]) do
+        {:ok, [^seed]} ->
+          Logger.info("Mnesia connected to seed #{seed}")
+          true
+
+        other ->
+          Logger.error("Mnesia could not connect to seed #{seed}: #{inspect(other)}")
+          false
+      end
+
+    if not connected do
+      # Fall back to primary — we'll have local tables, but at least
+      # the node will start. Operator can `sync repair` later.
+      init_as_primary(data_dir)
+    else
+      # Upgrade our schema to disc_copies (now has seed's cookies)
+      ensure_disc_schema()
+
+      # Copy system tables from the cluster instead of creating new ones
+      for {name, _attrs} <- @system_tables_def do
+        case :mnesia.add_table_copy(name, node(), storage_type()) do
+          {:atomic, :ok} ->
+            Logger.info("Copied #{name} from cluster")
+
+          {:aborted, {:already_exists, _, _}} ->
+            :ok
+
+          {:aborted, reason} ->
+            Logger.warning("Failed to copy #{name} from cluster: #{inspect(reason)}")
+        end
+      end
+
+      # Wait for all tables to sync from the seed
+      tables = Enum.map(@system_tables_def, &elem(&1, 0))
+
+      case :mnesia.wait_for_tables(tables, 30_000) do
+        :ok ->
+          Logger.info("Mnesia started as secondary (seed: #{seed}), data dir: #{data_dir}")
+
+        {:timeout, bad} ->
+          Logger.warning("Timed out waiting for tables: #{inspect(bad)}")
+      end
+    end
+  end
+
+  defp system_tables_exist? do
+    # If Mnesia knows about cortex_acls as a local table, we have prior state
+    @acl_table in :mnesia.system_info(:local_tables)
+  end
+
+  defp ensure_mnesia_started do
     case :mnesia.start() do
       :ok -> :ok
       {:error, {:already_started, :mnesia}} -> :ok
     end
+  end
 
-    # Ensure schema is persisted to disc on named nodes.
-    # If Mnesia was already started by the release boot, create_schema
-    # above fails and the schema stays ram_copies. This upgrades it.
+  defp ensure_disc_schema do
     if node() != :nonode@nohost do
       case :mnesia.change_table_copy_type(:schema, node(), :disc_copies) do
         {:atomic, :ok} -> Logger.info("Mnesia schema upgraded to disc_copies")
@@ -54,13 +144,27 @@ defmodule Cortex.Store do
         {:aborted, reason} -> Logger.warning("Schema disc upgrade: #{inspect(reason)}")
       end
     end
+  end
 
-    # System tables
-    create_system_table(@acl_table, [:identity_table, :permissions])
-    create_system_table(@meta_table, [:table_name, :owner, :key_field, :attributes, :node_scope])
-    create_system_table(@identities_table, [:fed_id, :mappings, :metadata])
+  # Try to find a reachable seed node from mesh config.
+  # Returns nil if no mesh, no peers, or no peers reachable.
+  defp find_seed_node do
+    case Cortex.mesh_config() do
+      nil ->
+        nil
 
-    Logger.info("Mnesia started, data dir: #{data_dir}")
+      config ->
+        peers = Keyword.get(config, :nodes, [])
+
+        Enum.find_value(peers, fn {_name, host, _port} ->
+          erlang_node = String.to_atom("cortex@#{host}")
+
+          case Node.connect(erlang_node) do
+            true -> erlang_node
+            _ -> nil
+          end
+        end)
+    end
   end
 
   defp create_system_table(name, attributes) do
