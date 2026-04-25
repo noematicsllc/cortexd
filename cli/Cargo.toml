@@ -13,7 +13,7 @@ serde_json = "1"
 native-tls = "0.2"
 sha2 = "0.10"
 base64 = "0.22"
-rand = "0.8"
+rand = "0.10"
 hostname = "0.4"
 
 [profile.release]
